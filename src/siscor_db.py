@@ -737,6 +737,217 @@ def _productos_a_impulsar_from_frames(actual: pd.DataFrame, anterior: pd.DataFra
     return out.sort_values("variacion").head(limite).loc[:, columns]
 
 
+def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
+    if data_mode() == "snapshot":
+        df = _snapshot_filtered_facturas(zonas_filtro=zonas_filtro)
+        if df.empty:
+            return pd.DataFrame(columns=["cliente"])
+        return pd.DataFrame({"cliente": sorted(df["cliente"].dropna().astype(str).unique())})
+
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT DISTINCT
+            COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente
+        FROM dbo.cli_factura f
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          {zona_sql}
+        ORDER BY cliente;
+        """,
+        zona_params,
+    )
+
+
+def estrategia_cliente(
+    cliente: str,
+    mes_actual_desde: str,
+    fecha_hasta: str,
+    mes_anterior_desde: str,
+    mes_anterior_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+    limite_productos: int = 8,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if data_mode() == "snapshot":
+        actual = _snapshot_filtered_facturas(mes_actual_desde, fecha_hasta, zonas_filtro)
+        anterior = _snapshot_filtered_facturas(mes_anterior_desde, mes_anterior_hasta, zonas_filtro)
+        return _estrategia_cliente_from_frames(cliente, actual, anterior, limite_productos)
+
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    resumen = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH base AS (
+            SELECT
+                CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ? THEN 'actual' ELSE 'anterior' END AS periodo,
+                {_signed_total("f", "total")} AS total,
+                f.id_facturacion,
+                CAST(f.fecha AS date) AS fecha
+            FROM dbo.cli_factura f
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+              AND (
+                    CAST(f.fecha AS date) BETWEEN ? AND ?
+                 OR CAST(f.fecha AS date) BETWEEN ? AND ?
+              )
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+        )
+        SELECT
+            ISNULL(SUM(CASE WHEN periodo = 'actual' THEN total ELSE 0 END), 0) AS venta_mes,
+            ISNULL(SUM(CASE WHEN periodo = 'anterior' THEN total ELSE 0 END), 0) AS venta_mes_anterior,
+            COUNT(CASE WHEN periodo = 'actual' THEN id_facturacion END) AS comprobantes_mes,
+            MAX(fecha) AS ultima_compra
+        FROM base;
+        """,
+        (
+            mes_actual_desde,
+            fecha_hasta,
+            cliente,
+            mes_actual_desde,
+            fecha_hasta,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            *zona_params,
+        ),
+    )
+    productos = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT TOP (?)
+            COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad,
+            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS total
+        FROM dbo.cli_factura_item fi
+        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+          AND CAST(f.fecha AS date) BETWEEN ? AND ?
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          {zona_sql}
+        GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        ORDER BY total DESC;
+        """,
+        (limite_productos, cliente, mes_actual_desde, fecha_hasta, *zona_params),
+    )
+    caidos = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH actual AS (
+            SELECT
+                fi.id_producto,
+                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        ),
+        anterior AS (
+            SELECT
+                fi.id_producto,
+                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes_anterior
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        )
+        SELECT TOP (?)
+            p.producto,
+            ISNULL(a.venta_mes, 0) AS venta_mes,
+            p.venta_mes_anterior,
+            ISNULL(a.venta_mes, 0) - p.venta_mes_anterior AS variacion
+        FROM anterior p
+        LEFT JOIN actual a ON a.id_producto = p.id_producto
+        WHERE ISNULL(a.venta_mes, 0) < p.venta_mes_anterior * 0.8
+        ORDER BY variacion ASC;
+        """,
+        (
+            cliente,
+            mes_actual_desde,
+            fecha_hasta,
+            *zona_params,
+            cliente,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            *zona_params,
+            limite_productos,
+        ),
+    )
+    return resumen, productos, caidos
+
+
+def _estrategia_cliente_from_frames(
+    cliente: str,
+    actual: pd.DataFrame,
+    anterior: pd.DataFrame,
+    limite_productos: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    actual_cliente = actual[actual["cliente"].astype(str) == cliente].copy()
+    anterior_cliente = anterior[anterior["cliente"].astype(str) == cliente].copy()
+    venta_mes = actual_cliente["total_firmado"].sum() if not actual_cliente.empty else 0
+    venta_mes_anterior = anterior_cliente["total_firmado"].sum() if not anterior_cliente.empty else 0
+    resumen = pd.DataFrame(
+        {
+            "venta_mes": [venta_mes],
+            "venta_mes_anterior": [venta_mes_anterior],
+            "comprobantes_mes": [len(actual_cliente)],
+            "ultima_compra": [actual_cliente["fecha"].max().date() if not actual_cliente.empty else None],
+        }
+    )
+
+    items = _snapshot_factura_items()
+
+    def product_sales(facturas: pd.DataFrame, qty_name: str, total_name: str) -> pd.DataFrame:
+        if facturas.empty:
+            return pd.DataFrame(columns=["id_producto", "producto", qty_name, total_name])
+        base = facturas[["id_facturacion", "tipo"]].merge(items, on="id_facturacion", how="inner")
+        sign = base["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        base[qty_name] = base["cantidad"].astype(float) * sign
+        base[total_name] = base["total"].astype(float) * sign
+        return (
+            base.groupby(["id_producto", "producto"], as_index=False)
+            .agg(**{qty_name: (qty_name, "sum"), total_name: (total_name, "sum")})
+        )
+
+    productos = (
+        product_sales(actual_cliente, "cantidad", "total")
+        .sort_values("total", ascending=False)
+        .head(limite_productos)
+        .loc[:, ["producto", "cantidad", "total"]]
+    )
+    actuales = product_sales(actual_cliente, "cantidad_mes", "venta_mes")
+    anteriores = product_sales(anterior_cliente, "cantidad_mes_anterior", "venta_mes_anterior")
+    if anteriores.empty:
+        caidos = pd.DataFrame(columns=["producto", "venta_mes", "venta_mes_anterior", "variacion"])
+    else:
+        caidos = anteriores.merge(actuales, on=["id_producto", "producto"], how="left")
+        caidos["venta_mes"] = caidos["venta_mes"].fillna(0)
+        caidos["variacion"] = caidos["venta_mes"] - caidos["venta_mes_anterior"]
+        caidos = caidos[caidos["venta_mes"] < caidos["venta_mes_anterior"] * 0.8]
+        caidos = caidos.sort_values("variacion").head(limite_productos)
+        caidos = caidos.loc[:, ["producto", "venta_mes", "venta_mes_anterior", "variacion"]]
+    return resumen, productos, caidos
+
+
 def pedidos_pendientes(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     zona_sql, zona_params = _zona_filter("p", zonas_filtro)
     return read_sql(

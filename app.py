@@ -135,6 +135,11 @@ def percent(value: object) -> str:
     return f"{float(value) * 100:,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def numeric_value(value: object) -> float:
+    numeric = pd.to_numeric(value, errors="coerce")
+    return 0.0 if pd.isna(numeric) else float(numeric)
+
+
 def seller_action_message(performance_row: pd.Series | None, clients: pd.DataFrame, products: pd.DataFrame) -> str:
     if performance_row is None:
         return "No hay objetivo asignado para esta zona. Revisar configuracion antes de evaluar desempeno."
@@ -152,6 +157,25 @@ def seller_action_message(performance_row: pd.Series | None, clients: pd.DataFra
     if not products.empty:
         base += f" Producto foco: {products.iloc[0]['producto']}."
     return base
+
+
+def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFrame) -> str:
+    venta_mes = numeric_value(resumen.get("venta_mes"))
+    venta_anterior = numeric_value(resumen.get("venta_mes_anterior"))
+    variacion = venta_mes - venta_anterior
+
+    if venta_anterior <= 0 and venta_mes > 0:
+        message = f"{cliente} aparece activo este mes. Conviene sostener frecuencia y revisar productos complementarios."
+    elif venta_mes <= 0 and venta_anterior > 0:
+        message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para contacto o visita."
+    elif variacion < 0:
+        message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar la visita en recuperar rotacion."
+    else:
+        message = f"{cliente} viene por encima del mes anterior. Buscar ampliar ticket con productos complementarios."
+
+    if not caidos.empty:
+        message += f" Producto a recuperar: {caidos.iloc[0]['producto']}."
+    return message
 
 
 def login_screen() -> None:
@@ -437,6 +461,78 @@ if not current_user.is_admin:
                 "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
             },
         )
+
+    st.subheader("Estrategia cliente")
+    clientes_opciones = sorted(
+        pd.concat(
+            [
+                clientes_vendedor.get("cliente", pd.Series(dtype=str)),
+                top_clientes_vendedor.get("cliente", pd.Series(dtype=str)),
+            ],
+            ignore_index=True,
+        )
+        .dropna()
+        .astype(str)
+        .unique()
+    )
+    cliente_seleccionado = None
+    if clientes_opciones:
+        cliente_seleccionado = st.selectbox(
+            "Cliente",
+            clientes_opciones,
+            index=None,
+            placeholder="Buscar cliente",
+        )
+    else:
+        st.info("No hay clientes con movimiento suficiente para generar estrategia en este periodo.")
+
+    if cliente_seleccionado:
+        resumen_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
+            cliente_seleccionado,
+            mes_actual_desde.isoformat(),
+            fecha_maxima.isoformat(),
+            mes_anterior_desde.isoformat(),
+            mes_anterior_hasta.isoformat(),
+            zonas_filtro,
+        )
+        resumen_row = resumen_cliente.iloc[0]
+        venta_mes_cliente = numeric_value(resumen_row["venta_mes"])
+        venta_anterior_cliente = numeric_value(resumen_row["venta_mes_anterior"])
+        ultima_compra = resumen_row["ultima_compra"]
+        ultima_compra_texto = "Sin compra" if pd.isna(ultima_compra) else str(ultima_compra)
+        ec1, ec2, ec3, ec4 = st.columns(4)
+        ec1.metric("Venta mes", money(venta_mes_cliente))
+        ec2.metric("Mes anterior", money(venta_anterior_cliente))
+        ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
+        ec4.metric("Ultima compra", ultima_compra_texto)
+        st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente))
+
+        cprod, ccaidos = st.columns(2)
+        with cprod:
+            st.markdown("#### Productos habituales")
+            st.dataframe(
+                productos_cliente,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "producto": "Producto",
+                    "cantidad": st.column_config.NumberColumn("Cantidad", format="%.2f"),
+                    "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
+                },
+            )
+        with ccaidos:
+            st.markdown("#### Productos caidos")
+            st.dataframe(
+                caidos_cliente,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "producto": "Producto",
+                    "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
+                    "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+                    "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
+                },
+            )
 
     st.stop()
 
