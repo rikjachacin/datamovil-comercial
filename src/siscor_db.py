@@ -607,6 +607,136 @@ def _clientes_a_recuperar_from_frames(actual: pd.DataFrame, anterior: pd.DataFra
     return out.sort_values("variacion").head(limite).loc[:, columns]
 
 
+def productos_a_impulsar(
+    mes_actual_desde: str,
+    fecha_hasta: str,
+    mes_anterior_desde: str,
+    mes_anterior_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+    limite: int = 20,
+) -> pd.DataFrame:
+    if data_mode() == "snapshot":
+        actual_facturas = _snapshot_filtered_facturas(mes_actual_desde, fecha_hasta, zonas_filtro)[["id_facturacion", "tipo"]]
+        anterior_facturas = _snapshot_filtered_facturas(mes_anterior_desde, mes_anterior_hasta, zonas_filtro)[
+            ["id_facturacion", "tipo"]
+        ]
+        items = _snapshot_factura_items()
+        actual = items.merge(actual_facturas, on="id_facturacion", how="inner")
+        anterior = items.merge(anterior_facturas, on="id_facturacion", how="inner")
+        return _productos_a_impulsar_from_frames(actual, anterior, limite)
+
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH actual AS (
+            SELECT
+                fi.id_producto,
+                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad_mes,
+                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        ),
+        anterior AS (
+            SELECT
+                fi.id_producto,
+                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad_mes_anterior,
+                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes_anterior
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        )
+        SELECT TOP (?)
+            COALESCE(a.producto, p.producto) AS producto,
+            ISNULL(a.cantidad_mes, 0) AS cantidad_mes,
+            ISNULL(p.cantidad_mes_anterior, 0) AS cantidad_mes_anterior,
+            ISNULL(a.venta_mes, 0) AS venta_mes,
+            ISNULL(p.venta_mes_anterior, 0) AS venta_mes_anterior,
+            ISNULL(a.venta_mes, 0) - ISNULL(p.venta_mes_anterior, 0) AS variacion,
+            CASE
+                WHEN ISNULL(a.venta_mes, 0) = 0 AND ISNULL(p.venta_mes_anterior, 0) > 0 THEN 'Reponer en la conversacion'
+                WHEN ISNULL(a.venta_mes, 0) < ISNULL(p.venta_mes_anterior, 0) * 0.6 THEN 'Impulsar oferta'
+                ELSE 'Monitorear'
+            END AS accion
+        FROM actual a
+        FULL OUTER JOIN anterior p ON p.id_producto = a.id_producto
+        WHERE ISNULL(p.venta_mes_anterior, 0) > 0
+          AND ISNULL(a.venta_mes, 0) < ISNULL(p.venta_mes_anterior, 0) * 0.8
+        ORDER BY variacion ASC;
+        """,
+        (
+            mes_actual_desde,
+            fecha_hasta,
+            *zona_params,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            *zona_params,
+            limite,
+        ),
+    )
+
+
+def _productos_a_impulsar_from_frames(actual: pd.DataFrame, anterior: pd.DataFrame, limite: int) -> pd.DataFrame:
+    columns = [
+        "producto",
+        "cantidad_mes",
+        "cantidad_mes_anterior",
+        "venta_mes",
+        "venta_mes_anterior",
+        "variacion",
+        "accion",
+    ]
+    if anterior.empty:
+        return pd.DataFrame(columns=columns)
+
+    def signed_items(df: pd.DataFrame, qty_name: str, total_name: str) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame(columns=["id_producto", "producto", qty_name, total_name])
+        temp = df.copy()
+        sign = temp["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        temp[qty_name] = temp["cantidad"].astype(float) * sign
+        temp[total_name] = temp["total"].astype(float) * sign
+        temp["producto"] = temp["producto"].fillna("")
+        empty_product = temp["producto"] == ""
+        temp.loc[empty_product, "producto"] = "Producto " + temp.loc[empty_product, "id_producto"].astype(str)
+        return (
+            temp.groupby(["id_producto", "producto"], as_index=False)
+            .agg(**{qty_name: (qty_name, "sum"), total_name: (total_name, "sum")})
+        )
+
+    current = signed_items(actual, "cantidad_mes", "venta_mes")
+    previous = signed_items(anterior, "cantidad_mes_anterior", "venta_mes_anterior")
+    out = previous.merge(current, on=["id_producto", "producto"], how="left")
+    out["cantidad_mes"] = out["cantidad_mes"].fillna(0)
+    out["venta_mes"] = out["venta_mes"].fillna(0)
+    out["variacion"] = out["venta_mes"] - out["venta_mes_anterior"]
+    out = out[(out["venta_mes_anterior"] > 0) & (out["venta_mes"] < out["venta_mes_anterior"] * 0.8)]
+    out["accion"] = out.apply(
+        lambda row: "Reponer en la conversacion"
+        if row["venta_mes"] == 0
+        else "Impulsar oferta"
+        if row["venta_mes"] < row["venta_mes_anterior"] * 0.6
+        else "Monitorear",
+        axis=1,
+    )
+    return out.sort_values("variacion").head(limite).loc[:, columns]
+
+
 def pedidos_pendientes(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     zona_sql, zona_params = _zona_filter("p", zonas_filtro)
     return read_sql(

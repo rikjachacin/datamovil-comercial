@@ -449,6 +449,13 @@ clientes_recuperar = siscor_db.clientes_a_recuperar(
     mes_anterior_hasta.isoformat(),
     zonas_filtro,
 )
+productos_impulsar = siscor_db.productos_a_impulsar(
+    mes_actual_desde.isoformat(),
+    fecha_maxima.isoformat(),
+    mes_anterior_desde.isoformat(),
+    mes_anterior_hasta.isoformat(),
+    zonas_filtro,
+)
 
 graf_1, graf_2 = st.columns([1.2, 1])
 with graf_1:
@@ -495,6 +502,22 @@ with tab_clientes:
     )
 
 with tab_productos:
+    st.markdown("#### Productos foco para impulsar")
+    st.dataframe(
+        productos_impulsar,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "producto": "Producto",
+            "cantidad_mes": st.column_config.NumberColumn("Cantidad mes", format="%.2f"),
+            "cantidad_mes_anterior": st.column_config.NumberColumn("Cantidad mes anterior", format="%.2f"),
+            "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
+            "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+            "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
+            "accion": "Accion sugerida",
+        },
+    )
+    st.markdown("#### Principales productos del periodo")
     st.dataframe(
         top_productos,
         use_container_width=True,
