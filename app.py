@@ -226,6 +226,20 @@ if siscor_db.using_sample_snapshot():
     st.warning("Vista de prueba con datos ficticios. No corresponde a ventas reales de SisCor.")
 
 mes_actual_desde = max(fecha_minima, pd.Timestamp(fecha_maxima).replace(day=1).date())
+mes_objetivo = objectives.month_key(fecha_maxima)
+avance_mes = objectives.month_progress(fecha_maxima)
+try:
+    objetivos_df = objectives.load_objectives()
+except Exception as exc:
+    st.error("No pude leer la tabla de objetivos.")
+    st.code("".join(traceback.format_exception_only(type(exc), exc)).strip())
+    objetivos_df = pd.DataFrame(columns=["mes", "zona", "objetivo"])
+
+zonas_objetivo = tuple(
+    objetivos_df.loc[objetivos_df["mes"] == mes_objetivo, "zona"].dropna().astype(str)
+)
+if zonas_objetivo:
+    zonas_df = zonas_df[zonas_df["zona"].isin(zonas_objetivo)].copy()
 
 with st.sidebar:
     st.subheader("Segmentadores")
@@ -271,6 +285,8 @@ with st.sidebar:
             st.warning("Tu usuario no tiene una zona valida asignada.")
 
 zonas_filtro = tuple(str(value) for value in zona_seleccion)
+if not zonas_filtro and zonas_objetivo:
+    zonas_filtro = zonas_objetivo
 
 if fecha_desde > fecha_hasta:
     st.warning("La fecha desde no puede ser mayor que la fecha hasta.")
@@ -289,19 +305,11 @@ m4.metric("Ticket promedio", money(kpi_df["ticket_promedio"]))
 
 st.divider()
 
-mes_objetivo = objectives.month_key(fecha_maxima)
-avance_mes = objectives.month_progress(fecha_maxima)
 ventas_objetivo = siscor_db.ventas_por_zona(
     mes_actual_desde.isoformat(),
     fecha_maxima.isoformat(),
-    (),
+    zonas_objetivo,
 )
-try:
-    objetivos_df = objectives.load_objectives()
-except Exception as exc:
-    st.error("No pude leer la tabla de objetivos.")
-    st.code("".join(traceback.format_exception_only(type(exc), exc)).strip())
-    objetivos_df = pd.DataFrame(columns=["mes", "zona", "objetivo"])
 
 st.subheader("Objetivos y ritmo del mes")
 if objetivos_df.empty:
