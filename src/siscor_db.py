@@ -497,6 +497,116 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
     )
 
 
+def clientes_a_recuperar(
+    mes_actual_desde: str,
+    fecha_hasta: str,
+    mes_anterior_desde: str,
+    mes_anterior_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+    limite: int = 20,
+) -> pd.DataFrame:
+    if data_mode() == "snapshot":
+        actual = _snapshot_filtered_facturas(mes_actual_desde, fecha_hasta, zonas_filtro)
+        anterior = _snapshot_filtered_facturas(mes_anterior_desde, mes_anterior_hasta, zonas_filtro)
+        return _clientes_a_recuperar_from_frames(actual, anterior, limite)
+
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH actual AS (
+            SELECT
+                f.id_cliente,
+                COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente,
+                COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
+                SUM({_signed_total("f", "total")}) AS venta_mes
+            FROM dbo.cli_factura f
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY f.id_cliente, COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)), COALESCE(NULLIF(f.zona, ''), 'Sin zona')
+        ),
+        anterior AS (
+            SELECT
+                f.id_cliente,
+                COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente,
+                COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
+                SUM({_signed_total("f", "total")}) AS venta_mes_anterior
+            FROM dbo.cli_factura f
+            WHERE ISNULL(f.Anulado, 0) = 0
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY f.id_cliente, COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)), COALESCE(NULLIF(f.zona, ''), 'Sin zona')
+        )
+        SELECT TOP (?)
+            COALESCE(a.cliente, p.cliente) AS cliente,
+            COALESCE(a.zona, p.zona) AS zona,
+            ISNULL(a.venta_mes, 0) AS venta_mes,
+            ISNULL(p.venta_mes_anterior, 0) AS venta_mes_anterior,
+            ISNULL(a.venta_mes, 0) - ISNULL(p.venta_mes_anterior, 0) AS variacion,
+            CASE
+                WHEN ISNULL(a.venta_mes, 0) = 0 AND ISNULL(p.venta_mes_anterior, 0) > 0 THEN 'Recuperar visita'
+                WHEN ISNULL(a.venta_mes, 0) < ISNULL(p.venta_mes_anterior, 0) * 0.6 THEN 'Reactivar compra'
+                ELSE 'Dar seguimiento'
+            END AS accion
+        FROM actual a
+        FULL OUTER JOIN anterior p
+            ON p.id_cliente = a.id_cliente
+           AND p.zona = a.zona
+        WHERE ISNULL(p.venta_mes_anterior, 0) > 0
+          AND ISNULL(a.venta_mes, 0) < ISNULL(p.venta_mes_anterior, 0) * 0.8
+        ORDER BY variacion ASC;
+        """,
+        (
+            mes_actual_desde,
+            fecha_hasta,
+            *zona_params,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            *zona_params,
+            limite,
+        ),
+    )
+
+
+def _clientes_a_recuperar_from_frames(actual: pd.DataFrame, anterior: pd.DataFrame, limite: int) -> pd.DataFrame:
+    columns = ["cliente", "zona", "venta_mes", "venta_mes_anterior", "variacion", "accion"]
+    if anterior.empty:
+        return pd.DataFrame(columns=columns)
+
+    def grouped(df: pd.DataFrame, value_name: str) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame(columns=["id_cliente", "cliente", "zona", value_name])
+        temp = df.copy()
+        temp["cliente"] = temp["cliente"].fillna("")
+        empty_client = temp["cliente"] == ""
+        temp.loc[empty_client, "cliente"] = "Cliente " + temp.loc[empty_client, "id_cliente"].astype(str)
+        return (
+            temp.groupby(["id_cliente", "cliente", "zona"], as_index=False)
+            .agg(**{value_name: ("total_firmado", "sum")})
+        )
+
+    current = grouped(actual, "venta_mes")
+    previous = grouped(anterior, "venta_mes_anterior")
+    out = previous.merge(current, on=["id_cliente", "cliente", "zona"], how="left")
+    out["venta_mes"] = out["venta_mes"].fillna(0)
+    out["variacion"] = out["venta_mes"] - out["venta_mes_anterior"]
+    out = out[(out["venta_mes_anterior"] > 0) & (out["venta_mes"] < out["venta_mes_anterior"] * 0.8)]
+    out["accion"] = out.apply(
+        lambda row: "Recuperar visita"
+        if row["venta_mes"] == 0
+        else "Reactivar compra"
+        if row["venta_mes"] < row["venta_mes_anterior"] * 0.6
+        else "Dar seguimiento",
+        axis=1,
+    )
+    return out.sort_values("variacion").head(limite).loc[:, columns]
+
+
 def pedidos_pendientes(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     zona_sql, zona_params = _zona_filter("p", zonas_filtro)
     return read_sql(

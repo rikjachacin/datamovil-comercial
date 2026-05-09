@@ -226,6 +226,8 @@ if siscor_db.using_sample_snapshot():
     st.warning("Vista de prueba con datos ficticios. No corresponde a ventas reales de SisCor.")
 
 mes_actual_desde = max(fecha_minima, pd.Timestamp(fecha_maxima).replace(day=1).date())
+mes_anterior_desde = (pd.Timestamp(mes_actual_desde) - pd.DateOffset(months=1)).date()
+mes_anterior_hasta = (pd.Timestamp(mes_actual_desde) - pd.Timedelta(days=1)).date()
 mes_objetivo = objectives.month_key(fecha_maxima)
 avance_mes = objectives.month_progress(fecha_maxima)
 dias_restantes = objectives.remaining_days(fecha_maxima)
@@ -440,6 +442,13 @@ ventas_mes = siscor_db.ventas_por_mes(desde_sql, hasta_sql, zonas_filtro)
 ventas_zona = siscor_db.ventas_por_zona(desde_sql, hasta_sql, zonas_filtro)
 top_clientes = siscor_db.top_clientes(desde_sql, hasta_sql, zonas_filtro)
 top_productos = siscor_db.top_productos(desde_sql, hasta_sql, zonas_filtro)
+clientes_recuperar = siscor_db.clientes_a_recuperar(
+    mes_actual_desde.isoformat(),
+    fecha_maxima.isoformat(),
+    mes_anterior_desde.isoformat(),
+    mes_anterior_hasta.isoformat(),
+    zonas_filtro,
+)
 
 graf_1, graf_2 = st.columns([1.2, 1])
 with graf_1:
@@ -459,6 +468,21 @@ with graf_2:
 tab_clientes, tab_productos, tab_zonas = st.tabs(["Clientes", "Productos", "Zona"])
 
 with tab_clientes:
+    st.markdown("#### Clientes prioritarios para recuperar")
+    st.dataframe(
+        clientes_recuperar,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "cliente": "Cliente",
+            "zona": "Zona",
+            "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
+            "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+            "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
+            "accion": "Accion sugerida",
+        },
+    )
+    st.markdown("#### Principales clientes del periodo")
     st.dataframe(
         top_clientes,
         use_container_width=True,
