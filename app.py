@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import traceback
 
 import pandas as pd
 import plotly.express as px
@@ -203,6 +204,7 @@ except Exception as exc:
     snapshot_error = getattr(siscor_db, "SnapshotDataMissing", RuntimeError)
     if siscor_db.data_mode() == "snapshot" and isinstance(exc, snapshot_error):
         st.warning("La aplicacion ya esta publicada, pero todavia no tiene datos cargados.")
+        st.code(str(exc))
         st.info(
             "En Streamlit Cloud estamos usando modo snapshot para no conectar directo a SisCor. "
             "Falta definir una fuente segura para subir los datos exportados sin publicar informacion comercial."
@@ -210,7 +212,7 @@ except Exception as exc:
         st.stop()
 
     st.error("No pude leer los datos comerciales.")
-    st.exception(exc)
+    st.code("".join(traceback.format_exception_only(type(exc), exc)).strip())
     st.stop()
 
 if siscor_db.using_sample_snapshot():

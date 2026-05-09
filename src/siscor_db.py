@@ -12,8 +12,13 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import pyodbc
 import streamlit as st
-from cryptography.fernet import Fernet, InvalidToken
 from streamlit.errors import StreamlitSecretNotFoundError
+
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:
+    Fernet = None
+    InvalidToken = ValueError
 
 
 SISCOR_CONFIG_PATH = Path(r"C:\SisCor\SisCor.exe.config")
@@ -120,6 +125,8 @@ def _read_snapshot_csv(filename: str, sample_path: Path) -> pd.DataFrame:
 
     encrypted_path = SNAPSHOT_DIR / f"{filename}.enc"
     if encrypted_path.exists():
+        if Fernet is None:
+            raise SnapshotDataMissing("Falta instalar cryptography para leer el snapshot cifrado.")
         key = _snapshot_key()
         if not key:
             raise SnapshotDataMissing("Falta la clave data.snapshot_key para leer el snapshot cifrado.")
