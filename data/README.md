@@ -16,3 +16,9 @@ Archivos publicados en GitHub:
 
 Los archivos `.enc` estan cifrados. La clave debe guardarse en Streamlit Secrets como
 `data.snapshot_key` y no debe subirse al repositorio.
+
+Objetivos comerciales:
+
+- `objetivos.csv` se usa localmente para cargar metas mensuales por zona.
+- Debe tener columnas `mes`, `zona`, `objetivo`.
+- `objetivos.example.csv` muestra el formato esperado.

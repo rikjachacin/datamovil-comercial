@@ -8,6 +8,7 @@ import plotly.express as px
 import streamlit as st
 
 from src import auth
+from src import objectives
 from src import siscor_db
 
 
@@ -126,6 +127,12 @@ def number(value: object) -> str:
     if pd.isna(value):
         return "0"
     return f"{float(value):,.0f}".replace(",", ".")
+
+
+def percent(value: object) -> str:
+    if pd.isna(value):
+        return "0,0 %"
+    return f"{float(value) * 100:,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def login_screen() -> None:
@@ -279,6 +286,98 @@ m1.metric("Ventas", money(kpi_df["total"]))
 m2.metric("Comprobantes", number(kpi_df["comprobantes"]))
 m3.metric("Clientes", number(kpi_df["clientes"]))
 m4.metric("Ticket promedio", money(kpi_df["ticket_promedio"]))
+
+st.divider()
+
+mes_objetivo = objectives.month_key(fecha_maxima)
+avance_mes = objectives.month_progress(fecha_maxima)
+ventas_objetivo = siscor_db.ventas_por_zona(
+    mes_actual_desde.isoformat(),
+    fecha_maxima.isoformat(),
+    (),
+)
+try:
+    objetivos_df = objectives.load_objectives()
+except Exception as exc:
+    st.error("No pude leer la tabla de objetivos.")
+    st.code("".join(traceback.format_exception_only(type(exc), exc)).strip())
+    objetivos_df = pd.DataFrame(columns=["mes", "zona", "objetivo"])
+
+st.subheader("Objetivos y ritmo del mes")
+if objetivos_df.empty:
+    st.info(
+        "Falta cargar la tabla de objetivos mensual. La app espera un archivo "
+        "data/objetivos.csv con columnas: mes, zona, objetivo."
+    )
+    st.dataframe(
+        pd.DataFrame(
+            {
+                "mes": [mes_objetivo],
+                "zona": ["CARINA"],
+                "objetivo": [50000000],
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+else:
+    desempeno_df = objectives.monthly_performance(
+        ventas_objetivo,
+        objetivos_df,
+        mes_objetivo,
+        avance_mes,
+    )
+    total_ventas_mes = desempeno_df["ventas_mes"].sum()
+    total_objetivo = desempeno_df["objetivo"].sum()
+    total_objetivo_esperado = desempeno_df["objetivo_esperado"].sum()
+    cumplimiento_total = total_ventas_mes / total_objetivo if total_objetivo else 0
+    ritmo_total = total_ventas_mes / total_objetivo_esperado if total_objetivo_esperado else 0
+    zonas_en_ritmo = int((desempeno_df["ritmo"] >= 1).sum())
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Cumplimiento mensual", percent(cumplimiento_total))
+    c2.metric("Ritmo esperado", percent(avance_mes))
+    c3.metric("Ritmo del equipo", percent(ritmo_total))
+    c4.metric("Zonas en ritmo", f"{zonas_en_ritmo}/{len(desempeno_df)}")
+
+    ranking_df = desempeno_df.copy()
+    ranking_df["cumplimiento_pct"] = ranking_df["cumplimiento"] * 100
+    ranking_df["ritmo_pct"] = ranking_df["ritmo"] * 100
+    ranking_df = ranking_df[
+        [
+            "zona",
+            "ventas_mes",
+            "objetivo",
+            "cumplimiento_pct",
+            "ritmo_pct",
+            "brecha_esperada",
+            "estado",
+        ]
+    ]
+    st.dataframe(
+        ranking_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "zona": "Zona",
+            "ventas_mes": st.column_config.NumberColumn("Ventas mes", format="$ %.0f"),
+            "objetivo": st.column_config.NumberColumn("Objetivo", format="$ %.0f"),
+            "cumplimiento_pct": st.column_config.ProgressColumn(
+                "Cumplimiento",
+                min_value=0,
+                max_value=100,
+                format="%.1f %%",
+            ),
+            "ritmo_pct": st.column_config.ProgressColumn(
+                "Ritmo a la fecha",
+                min_value=0,
+                max_value=120,
+                format="%.1f %%",
+            ),
+            "brecha_esperada": st.column_config.NumberColumn("Brecha vs ritmo", format="$ %.0f"),
+            "estado": "Estado",
+        },
+    )
 
 st.divider()
 
