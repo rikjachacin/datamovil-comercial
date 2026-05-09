@@ -327,18 +327,19 @@ else:
         mes_objetivo,
         avance_mes,
     )
-    total_ventas_mes = desempeno_df["ventas_mes"].sum()
-    total_objetivo = desempeno_df["objetivo"].sum()
-    total_objetivo_esperado = desempeno_df["objetivo_esperado"].sum()
+    desempeno_con_objetivo = desempeno_df[desempeno_df["tiene_objetivo"]].copy()
+    total_ventas_mes = desempeno_con_objetivo["ventas_mes"].sum()
+    total_objetivo = desempeno_con_objetivo["objetivo"].sum()
+    total_objetivo_esperado = desempeno_con_objetivo["objetivo_esperado"].sum()
     cumplimiento_total = total_ventas_mes / total_objetivo if total_objetivo else 0
     ritmo_total = total_ventas_mes / total_objetivo_esperado if total_objetivo_esperado else 0
-    zonas_en_ritmo = int((desempeno_df["ritmo"] >= 1).sum())
+    zonas_en_ritmo = int((desempeno_con_objetivo["ritmo"] >= 1).sum())
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Cumplimiento mensual", percent(cumplimiento_total))
     c2.metric("Ritmo esperado", percent(avance_mes))
     c3.metric("Ritmo del equipo", percent(ritmo_total))
-    c4.metric("Zonas en ritmo", f"{zonas_en_ritmo}/{len(desempeno_df)}")
+    c4.metric("Zonas en ritmo", f"{zonas_en_ritmo}/{len(desempeno_con_objetivo)}")
 
     ranking_df = desempeno_df.copy()
     ranking_df["cumplimiento_pct"] = ranking_df["cumplimiento"] * 100
@@ -351,9 +352,11 @@ else:
             "cumplimiento_pct",
             "ritmo_pct",
             "brecha_esperada",
+            "tiene_objetivo",
             "estado",
         ]
     ]
+    ranking_df.loc[~ranking_df["tiene_objetivo"], "estado"] = "Sin objetivo"
     st.dataframe(
         ranking_df,
         use_container_width=True,
@@ -375,6 +378,7 @@ else:
                 format="%.1f %%",
             ),
             "brecha_esperada": st.column_config.NumberColumn("Brecha vs ritmo", format="$ %.0f"),
+            "tiene_objetivo": None,
             "estado": "Estado",
         },
     )
