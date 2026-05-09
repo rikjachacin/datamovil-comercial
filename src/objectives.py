@@ -20,6 +20,12 @@ def month_progress(fecha: object) -> float:
     return min(current_date.day / days_in_month, 1.0)
 
 
+def remaining_days(fecha: object) -> int:
+    current_date = pd.to_datetime(fecha).date()
+    days_in_month = monthrange(current_date.year, current_date.month)[1]
+    return max(days_in_month - current_date.day, 0)
+
+
 def load_objectives(path: Path = OBJECTIVES_PATH) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
@@ -41,6 +47,7 @@ def monthly_performance(
     objetivos: pd.DataFrame,
     mes: str,
     avance_mes: float,
+    dias_restantes: int,
 ) -> pd.DataFrame:
     base = ventas_zona.loc[:, ["zona", "total", "comprobantes", "clientes"]].copy()
     base = base.rename(columns={"total": "ventas_mes"})
@@ -59,6 +66,17 @@ def monthly_performance(
         axis=1,
     )
     out["brecha_esperada"] = out["ventas_mes"] - out["objetivo_esperado"]
+    out["proyeccion_cierre"] = out.apply(
+        lambda row: row["ventas_mes"] / avance_mes if avance_mes else row["ventas_mes"],
+        axis=1,
+    )
+    out["brecha_objetivo"] = out["ventas_mes"] - out["objetivo"]
+    out["venta_diaria_necesaria"] = out.apply(
+        lambda row: max(row["objetivo"] - row["ventas_mes"], 0) / dias_restantes
+        if dias_restantes and row["objetivo"]
+        else 0,
+        axis=1,
+    )
     out["estado"] = out["ritmo"].map(_status)
     return out.sort_values(["ritmo", "ventas_mes"], ascending=[False, False])
 

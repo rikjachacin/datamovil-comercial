@@ -228,6 +228,7 @@ if siscor_db.using_sample_snapshot():
 mes_actual_desde = max(fecha_minima, pd.Timestamp(fecha_maxima).replace(day=1).date())
 mes_objetivo = objectives.month_key(fecha_maxima)
 avance_mes = objectives.month_progress(fecha_maxima)
+dias_restantes = objectives.remaining_days(fecha_maxima)
 try:
     objetivos_df = objectives.load_objectives()
 except Exception as exc:
@@ -334,11 +335,14 @@ else:
         objetivos_df,
         mes_objetivo,
         avance_mes,
+        dias_restantes,
     )
     desempeno_con_objetivo = desempeno_df[desempeno_df["tiene_objetivo"]].copy()
     total_ventas_mes = desempeno_con_objetivo["ventas_mes"].sum()
     total_objetivo = desempeno_con_objetivo["objetivo"].sum()
     total_objetivo_esperado = desempeno_con_objetivo["objetivo_esperado"].sum()
+    total_proyeccion = desempeno_con_objetivo["proyeccion_cierre"].sum()
+    venta_diaria_necesaria = desempeno_con_objetivo["venta_diaria_necesaria"].sum()
     cumplimiento_total = total_ventas_mes / total_objetivo if total_objetivo else 0
     ritmo_total = total_ventas_mes / total_objetivo_esperado if total_objetivo_esperado else 0
     zonas_en_ritmo = int((desempeno_con_objetivo["ritmo"] >= 1).sum())
@@ -348,6 +352,11 @@ else:
     c2.metric("Ritmo esperado", percent(avance_mes))
     c3.metric("Ritmo del equipo", percent(ritmo_total))
     c4.metric("Zonas en ritmo", f"{zonas_en_ritmo}/{len(desempeno_con_objetivo)}")
+
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Proyeccion de cierre", money(total_proyeccion))
+    p2.metric("Brecha proyectada", money(total_proyeccion - total_objetivo))
+    p3.metric("Venta diaria necesaria", money(venta_diaria_necesaria))
 
     ranking_df = desempeno_df.copy()
     ranking_df["cumplimiento_pct"] = ranking_df["cumplimiento"] * 100
@@ -359,6 +368,9 @@ else:
             "objetivo",
             "cumplimiento_pct",
             "ritmo_pct",
+            "proyeccion_cierre",
+            "brecha_objetivo",
+            "venta_diaria_necesaria",
             "brecha_esperada",
             "tiene_objetivo",
             "estado",
@@ -386,6 +398,9 @@ else:
                 format="%.1f %%",
             ),
             "brecha_esperada": st.column_config.NumberColumn("Brecha vs ritmo", format="$ %.0f"),
+            "proyeccion_cierre": st.column_config.NumberColumn("Proyeccion", format="$ %.0f"),
+            "brecha_objetivo": st.column_config.NumberColumn("Brecha objetivo", format="$ %.0f"),
+            "venta_diaria_necesaria": st.column_config.NumberColumn("Diario necesario", format="$ %.0f"),
             "tiene_objetivo": None,
             "estado": "Estado",
         },
