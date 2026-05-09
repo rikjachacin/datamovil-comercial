@@ -1,0 +1,12 @@
+[users.admin]
+password = "Bruncas2026!"
+name = "Administrador"
+role = "admin"
+zones = ["*"]
+
+[users.david]
+password = "david2026"
+name = "David"
+role = "seller"
+zones = ["DAVID"]
+

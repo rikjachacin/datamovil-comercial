@@ -1,0 +1,22 @@
+id_facturacion,id_producto,producto,cantidad,total
+900001,501,Producto Demo A,12,1750000
+900001,502,Producto Demo B,8,2500000
+900002,503,Producto Demo C,10,1850000
+900002,504,Producto Demo D,5,2000000
+900003,501,Producto Demo A,14,2520000
+900003,505,Producto Demo E,13,2600000
+900004,503,Producto Demo C,2,450000
+900005,502,Producto Demo B,16,3680000
+900005,506,Producto Demo F,10,2500000
+900006,504,Producto Demo D,1,320000
+900007,501,Producto Demo A,7,1260000
+900007,505,Producto Demo E,8,1720000
+900008,506,Producto Demo F,20,5200000
+900008,502,Producto Demo B,9,2250000
+900009,503,Producto Demo C,11,2360000
+900009,504,Producto Demo D,5,2000000
+900010,505,Producto Demo E,18,3890000
+900010,501,Producto Demo A,12,3000000
+900011,502,Producto Demo B,11,2750000
+900012,506,Producto Demo F,14,3480000
+900012,504,Producto Demo D,6,2500000

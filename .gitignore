@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+.streamlit/users.toml
+.env
+cloudflared*.log
+data/*.csv
+data/*.parquet
+data/*.key
+*.ovpn
+*.key
+*.crt
+*.p12
+*.pfx
