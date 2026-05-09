@@ -178,6 +178,70 @@ def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFra
     return message
 
 
+def build_action_radar(
+    performance: pd.DataFrame,
+    clients: pd.DataFrame,
+    products: pd.DataFrame,
+    limit: int = 12,
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+
+    if not performance.empty and "tiene_objetivo" in performance.columns:
+        scoped = performance[performance["tiene_objetivo"]].copy()
+        scoped = scoped[scoped["ritmo"] < 1].sort_values(["ritmo", "brecha_esperada"], ascending=[True, True])
+        for _, row in scoped.head(5).iterrows():
+            ritmo = numeric_value(row["ritmo"])
+            rows.append(
+                {
+                    "prioridad": "Alta" if ritmo < 0.85 else "Media",
+                    "frente": "Zona",
+                    "zona": row["zona"],
+                    "foco": f"Ritmo {percent(ritmo)}",
+                    "impacto_estimado": abs(numeric_value(row["brecha_esperada"])),
+                    "accion": "Acompanamiento diario y foco en clientes de mayor potencial",
+                }
+            )
+
+    if not clients.empty:
+        client_rows = clients.copy()
+        client_rows["impacto"] = client_rows["variacion"].map(lambda value: abs(numeric_value(value)))
+        for _, row in client_rows.sort_values("impacto", ascending=False).head(5).iterrows():
+            rows.append(
+                {
+                    "prioridad": "Alta" if numeric_value(row["impacto"]) >= 1_000_000 else "Media",
+                    "frente": "Cliente",
+                    "zona": row.get("zona", "Equipo"),
+                    "foco": row["cliente"],
+                    "impacto_estimado": numeric_value(row["impacto"]),
+                    "accion": row.get("accion", "Contactar y recuperar compra"),
+                }
+            )
+
+    if not products.empty:
+        product_rows = products.copy()
+        product_rows["impacto"] = product_rows["variacion"].map(lambda value: abs(numeric_value(value)))
+        for _, row in product_rows.sort_values("impacto", ascending=False).head(5).iterrows():
+            rows.append(
+                {
+                    "prioridad": "Media",
+                    "frente": "Producto",
+                    "zona": "Equipo",
+                    "foco": row["producto"],
+                    "impacto_estimado": numeric_value(row["impacto"]),
+                    "accion": row.get("accion", "Impulsar en visitas y reposicion"),
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=["prioridad", "frente", "zona", "foco", "impacto_estimado", "accion"])
+
+    radar = pd.DataFrame(rows)
+    priority_order = {"Alta": 0, "Media": 1, "Baja": 2}
+    radar["orden"] = radar["prioridad"].map(priority_order).fillna(9)
+    radar = radar.sort_values(["orden", "impacto_estimado"], ascending=[True, False]).head(limit)
+    return radar.drop(columns=["orden"])
+
+
 def login_screen() -> None:
     st.markdown(
         """
@@ -551,6 +615,7 @@ ventas_objetivo = siscor_db.ventas_por_zona(
 )
 
 st.subheader("Objetivos y ritmo del mes")
+desempeno_df = pd.DataFrame()
 if objetivos_df.empty:
     st.info(
         "Falta cargar la tabla de objetivos mensual. La app espera un archivo "
@@ -692,6 +757,32 @@ productos_impulsar = siscor_db.productos_a_impulsar(
     mes_anterior_hasta.isoformat(),
     zonas_filtro,
 )
+
+radar_acciones = build_action_radar(desempeno_df, clientes_recuperar, productos_impulsar)
+st.subheader("Radar de acciones")
+if radar_acciones.empty:
+    st.info("No hay alertas comerciales relevantes para este periodo.")
+else:
+    alta_prioridad = int((radar_acciones["prioridad"] == "Alta").sum())
+    impacto_principal = radar_acciones["impacto_estimado"].max()
+    zonas_priorizadas = radar_acciones.loc[radar_acciones["frente"] == "Zona", "zona"].nunique()
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Acciones altas", number(alta_prioridad))
+    a2.metric("Mayor oportunidad", money(impacto_principal))
+    a3.metric("Zonas a empujar", number(zonas_priorizadas))
+    st.dataframe(
+        radar_acciones,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "prioridad": "Prioridad",
+            "frente": "Frente",
+            "zona": "Zona",
+            "foco": "Foco",
+            "impacto_estimado": st.column_config.NumberColumn("Impacto estimado", format="$ %.0f"),
+            "accion": "Accion sugerida",
+        },
+    )
 
 graf_1, graf_2 = st.columns([1.2, 1])
 with graf_1:
