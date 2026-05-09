@@ -87,3 +87,35 @@ def _status(value: float) -> str:
     if value >= 0.85:
         return "Cerca"
     return "Necesita impulso"
+
+
+def executive_insights(performance: pd.DataFrame) -> dict[str, object]:
+    scoped = performance[performance["tiene_objetivo"]].copy()
+    if scoped.empty:
+        return {
+            "leader": None,
+            "risk": None,
+            "recovery_daily": 0.0,
+            "below_pace": 0,
+            "message": "No hay objetivos cargados para el mes.",
+        }
+
+    leader = scoped.sort_values(["ritmo", "ventas_mes"], ascending=[False, False]).iloc[0]
+    risk = scoped.sort_values(["brecha_esperada", "ritmo"], ascending=[True, True]).iloc[0]
+    below_pace = int((scoped["ritmo"] < 1).sum())
+    recovery_daily = scoped["venta_diaria_necesaria"].sum()
+
+    if below_pace == 0:
+        message = "El equipo esta por encima del ritmo esperado. Mantener frecuencia de visita y cuidar reposicion."
+    elif below_pace <= max(len(scoped) // 3, 1):
+        message = "Hay pocas zonas bajo ritmo. Conviene concentrar apoyo puntual sin cambiar la estrategia general."
+    else:
+        message = "La mayoria del equipo esta bajo ritmo. Priorizar visitas de recuperacion y foco diario por zona."
+
+    return {
+        "leader": leader,
+        "risk": risk,
+        "recovery_daily": recovery_daily,
+        "below_pace": below_pace,
+        "message": message,
+    }

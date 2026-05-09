@@ -358,6 +358,33 @@ else:
     p2.metric("Brecha proyectada", money(total_proyeccion - total_objetivo))
     p3.metric("Venta diaria necesaria", money(venta_diaria_necesaria))
 
+    insights = objectives.executive_insights(desempeno_df)
+    leader = insights["leader"]
+    risk = insights["risk"]
+
+    st.markdown("#### Lectura ejecutiva")
+    i1, i2, i3 = st.columns(3)
+    if leader is not None:
+        i1.metric(
+            "Mejor ritmo",
+            str(leader["zona"]),
+            percent(leader["ritmo"]),
+        )
+    else:
+        i1.metric("Mejor ritmo", "Sin datos")
+
+    if risk is not None:
+        i2.metric(
+            "Mayor brecha",
+            str(risk["zona"]),
+            money(risk["brecha_esperada"]),
+        )
+    else:
+        i2.metric("Mayor brecha", "Sin datos")
+
+    i3.metric("Zonas bajo ritmo", number(insights["below_pace"]))
+    st.info(str(insights["message"]))
+
     ranking_df = desempeno_df.copy()
     ranking_df["cumplimiento_pct"] = ranking_df["cumplimiento"] * 100
     ranking_df["ritmo_pct"] = ranking_df["ritmo"] * 100
