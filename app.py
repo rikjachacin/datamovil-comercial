@@ -135,6 +135,25 @@ def percent(value: object) -> str:
     return f"{float(value) * 100:,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def seller_action_message(performance_row: pd.Series | None, clients: pd.DataFrame, products: pd.DataFrame) -> str:
+    if performance_row is None:
+        return "No hay objetivo asignado para esta zona. Revisar configuracion antes de evaluar desempeno."
+
+    status = str(performance_row["estado"])
+    if status == "En ritmo":
+        base = "Vas en ritmo. Mantene frecuencia de visita y cuida reposicion en clientes activos."
+    elif status == "Cerca":
+        base = "Estas cerca del ritmo. Un empuje corto puede recuperar la brecha de este mes."
+    else:
+        base = "Necesitas recuperar ritmo. Prioriza visitas de clientes caidos y productos con baja frente al mes anterior."
+
+    if not clients.empty:
+        base += f" Primer cliente a revisar: {clients.iloc[0]['cliente']}."
+    if not products.empty:
+        base += f" Producto foco: {products.iloc[0]['producto']}."
+    return base
+
+
 def login_screen() -> None:
     st.markdown(
         """
@@ -299,6 +318,127 @@ desde_sql = fecha_desde.isoformat()
 hasta_sql = fecha_hasta.isoformat()
 
 kpi_df = siscor_db.kpis(desde_sql, hasta_sql, zonas_filtro).iloc[0]
+
+if not current_user.is_admin:
+    ventas_mes_vendedor = siscor_db.ventas_por_zona(
+        mes_actual_desde.isoformat(),
+        fecha_maxima.isoformat(),
+        zonas_filtro,
+    )
+    if objetivos_df.empty:
+        desempeno_vendedor = pd.DataFrame()
+    else:
+        desempeno_vendedor = objectives.monthly_performance(
+            ventas_mes_vendedor,
+            objetivos_df,
+            mes_objetivo,
+            avance_mes,
+            dias_restantes,
+        )
+
+    vendedor_row = None if desempeno_vendedor.empty else desempeno_vendedor.iloc[0]
+    clientes_vendedor = siscor_db.clientes_a_recuperar(
+        mes_actual_desde.isoformat(),
+        fecha_maxima.isoformat(),
+        mes_anterior_desde.isoformat(),
+        mes_anterior_hasta.isoformat(),
+        zonas_filtro,
+        limite=5,
+    )
+    productos_vendedor = siscor_db.productos_a_impulsar(
+        mes_actual_desde.isoformat(),
+        fecha_maxima.isoformat(),
+        mes_anterior_desde.isoformat(),
+        mes_anterior_hasta.isoformat(),
+        zonas_filtro,
+        limite=5,
+    )
+    top_clientes_vendedor = siscor_db.top_clientes(
+        mes_actual_desde.isoformat(),
+        fecha_maxima.isoformat(),
+        zonas_filtro,
+        limite=8,
+    )
+
+    st.subheader("Mi avance del mes")
+    if vendedor_row is None:
+        st.warning("Tu zona no tiene objetivo cargado para este mes.")
+    else:
+        v1, v2, v3, v4 = st.columns(4)
+        v1.metric("Ventas mes", money(vendedor_row["ventas_mes"]))
+        v2.metric("Objetivo", money(vendedor_row["objetivo"]))
+        v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
+        v4.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
+
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
+        r2.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
+        r3.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
+
+    st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor))
+
+    tab_plan, tab_clientes_v, tab_productos_v = st.tabs(["Plan de accion", "Clientes", "Productos"])
+    with tab_plan:
+        st.markdown("#### Clientes a recuperar")
+        st.dataframe(
+            clientes_vendedor,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "cliente": "Cliente",
+                "zona": "Zona",
+                "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
+                "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+                "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
+                "accion": "Accion sugerida",
+            },
+        )
+        st.markdown("#### Productos foco")
+        st.dataframe(
+            productos_vendedor,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "producto": "Producto",
+                "cantidad_mes": st.column_config.NumberColumn("Cantidad mes", format="%.2f"),
+                "cantidad_mes_anterior": st.column_config.NumberColumn("Cantidad anterior", format="%.2f"),
+                "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
+                "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+                "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
+                "accion": "Accion sugerida",
+            },
+        )
+
+    with tab_clientes_v:
+        st.dataframe(
+            top_clientes_vendedor,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "cliente": "Cliente",
+                "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
+                "comprobantes": st.column_config.NumberColumn("Comprobantes", format="%d"),
+            },
+        )
+
+    with tab_productos_v:
+        st.dataframe(
+            siscor_db.top_productos(
+                mes_actual_desde.isoformat(),
+                fecha_maxima.isoformat(),
+                zonas_filtro,
+                limite=8,
+            ),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "producto": "Producto",
+                "cantidad": st.column_config.NumberColumn("Cantidad", format="%.2f"),
+                "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
+            },
+        )
+
+    st.stop()
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Ventas", money(kpi_df["total"]))
