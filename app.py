@@ -307,6 +307,37 @@ def build_daily_plan(radar: pd.DataFrame, limit: int = 3) -> pd.DataFrame:
     return pd.DataFrame(plan_rows)
 
 
+def build_executive_brief(
+    period_label: str,
+    total_sales: float,
+    total_goal: float,
+    team_pace: float,
+    projected_gap: float,
+    daily_needed: float,
+    plan: pd.DataFrame,
+) -> str:
+    goal_text = money(total_goal) if total_goal else "sin objetivo cargado"
+    lines = [
+        f"Resumen comercial {period_label}",
+        f"Ventas acumuladas: {money(total_sales)} sobre objetivo {goal_text}.",
+        f"Ritmo del equipo: {percent(team_pace)}.",
+        f"Brecha proyectada al cierre: {money(projected_gap)}.",
+        f"Venta diaria necesaria para llegar al objetivo: {money(daily_needed)}.",
+    ]
+
+    if not plan.empty:
+        lines.append("Prioridades de hoy:")
+        for _, row in plan.iterrows():
+            lines.append(
+                f"- {row['orden']}: {row['titulo']} | {row['detalle']} | "
+                f"{row['accion']} | impacto {money(row['impacto_estimado'])}."
+            )
+    else:
+        lines.append("No hay prioridades criticas detectadas para hoy.")
+
+    return "\n".join(lines)
+
+
 def login_screen() -> None:
     st.markdown(
         """
@@ -681,6 +712,12 @@ ventas_objetivo = siscor_db.ventas_por_zona(
 
 st.subheader("Objetivos y ritmo del mes")
 desempeno_df = pd.DataFrame()
+total_ventas_mes = 0.0
+total_objetivo = 0.0
+total_proyeccion = 0.0
+venta_diaria_necesaria = 0.0
+cumplimiento_total = 0.0
+ritmo_total = 0.0
 if objetivos_df.empty:
     st.info(
         "Falta cargar la tabla de objetivos mensual. La app espera un archivo "
@@ -853,6 +890,23 @@ else:
                 """,
                 unsafe_allow_html=True,
             )
+
+    resumen_ejecutivo = build_executive_brief(
+        f"{mes_actual_desde.strftime('%d/%m/%Y')} al {fecha_maxima.strftime('%d/%m/%Y')}",
+        total_ventas_mes,
+        total_objetivo,
+        ritmo_total,
+        total_proyeccion - total_objetivo,
+        venta_diaria_necesaria,
+        plan_diario,
+    )
+    st.markdown("#### Resumen ejecutivo para compartir")
+    st.text_area(
+        "Texto sugerido",
+        resumen_ejecutivo,
+        height=210,
+        label_visibility="collapsed",
+    )
 
     st.dataframe(
         radar_acciones,
