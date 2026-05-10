@@ -236,12 +236,55 @@ def numeric_value(value: object) -> float:
     return 0.0 if pd.isna(numeric) else float(numeric)
 
 
-def seller_action_message(performance_row: pd.Series | None, clients: pd.DataFrame, products: pd.DataFrame) -> str:
+TELEMARKETING_ZONE_TOKENS = ("DAVID", "NOELIA", "MICAELA", "MACA", "MACARENA")
+
+
+def is_telemarketing_zone(zona: object) -> bool:
+    if isinstance(zona, (list, tuple, set)):
+        return any(is_telemarketing_zone(value) for value in zona)
+    zona_text = str(zona).upper()
+    return any(token in zona_text for token in TELEMARKETING_ZONE_TOKENS)
+
+
+def adapt_action_for_zone(action: object, zona: object) -> str:
+    action_text = str(action)
+    if not is_telemarketing_zone(zona):
+        return action_text
+    return (
+        action_text.replace("Recuperar visita", "Recuperar contacto")
+        .replace("visitas", "contactos")
+        .replace("visita", "llamada")
+        .replace("Acompanamiento diario", "Seguimiento diario")
+        .replace("Impulsar en contactos y reposicion", "Impulsar por llamada y WhatsApp")
+    )
+
+
+def adapt_actions_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "accion" not in df.columns or "zona" not in df.columns:
+        return df
+    out = df.copy()
+    out["accion"] = out.apply(lambda row: adapt_action_for_zone(row["accion"], row["zona"]), axis=1)
+    return out
+
+
+def seller_action_message(
+    performance_row: pd.Series | None,
+    clients: pd.DataFrame,
+    products: pd.DataFrame,
+    zonas: tuple[str, ...],
+) -> str:
     if performance_row is None:
         return "No hay objetivo asignado para esta zona. Revisar configuracion antes de evaluar desempeno."
 
+    is_telemarketing = is_telemarketing_zone(zonas)
     status = str(performance_row["estado"])
-    if status == "En ritmo":
+    if is_telemarketing and status == "En ritmo":
+        base = "Vas en ritmo. Mantene frecuencia de contacto, confirma reposicion y cuida clientes activos."
+    elif is_telemarketing and status == "Cerca":
+        base = "Estas cerca del ritmo. Un bloque corto de llamadas puede recuperar la brecha de este mes."
+    elif is_telemarketing:
+        base = "Necesitas recuperar ritmo. Prioriza llamadas a clientes caidos y productos con baja frente al mes anterior."
+    elif status == "En ritmo":
         base = "Vas en ritmo. Mantene frecuencia de visita y cuida reposicion en clientes activos."
     elif status == "Cerca":
         base = "Estas cerca del ritmo. Un empuje corto puede recuperar la brecha de este mes."
@@ -255,17 +298,24 @@ def seller_action_message(performance_row: pd.Series | None, clients: pd.DataFra
     return base
 
 
-def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFrame) -> str:
+def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFrame, zonas: tuple[str, ...]) -> str:
     venta_mes = numeric_value(resumen.get("venta_mes"))
     venta_anterior = numeric_value(resumen.get("venta_mes_anterior"))
     variacion = venta_mes - venta_anterior
+    is_telemarketing = is_telemarketing_zone(zonas)
 
     if venta_anterior <= 0 and venta_mes > 0:
         message = f"{cliente} aparece activo este mes. Conviene sostener frecuencia y revisar productos complementarios."
     elif venta_mes <= 0 and venta_anterior > 0:
-        message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para contacto o visita."
+        if is_telemarketing:
+            message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para llamada o WhatsApp."
+        else:
+            message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para contacto o visita."
     elif variacion < 0:
-        message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar la visita en recuperar rotacion."
+        if is_telemarketing:
+            message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar el contacto en recuperar rotacion."
+        else:
+            message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar la visita en recuperar rotacion."
     else:
         message = f"{cliente} viene por encima del mes anterior. Buscar ampliar ticket con productos complementarios."
 
@@ -294,7 +344,10 @@ def build_action_radar(
                     "zona": row["zona"],
                     "foco": f"Ritmo {percent(ritmo)}",
                     "impacto_estimado": abs(numeric_value(row["brecha_esperada"])),
-                    "accion": "Acompanamiento diario y foco en clientes de mayor potencial",
+                    "accion": adapt_action_for_zone(
+                        "Acompanamiento diario y foco en clientes de mayor potencial",
+                        row["zona"],
+                    ),
                 }
             )
 
@@ -309,7 +362,7 @@ def build_action_radar(
                     "zona": row.get("zona", "Equipo"),
                     "foco": row["cliente"],
                     "impacto_estimado": numeric_value(row["impacto"]),
-                    "accion": row.get("accion", "Contactar y recuperar compra"),
+                    "accion": adapt_action_for_zone(row.get("accion", "Contactar y recuperar compra"), row.get("zona")),
                 }
             )
 
@@ -324,7 +377,7 @@ def build_action_radar(
                     "zona": "Equipo",
                     "foco": row["producto"],
                     "impacto_estimado": numeric_value(row["impacto"]),
-                    "accion": row.get("accion", "Impulsar en visitas y reposicion"),
+                    "accion": "Impulsar en gestion comercial y reposicion",
                 }
             )
 
@@ -615,6 +668,7 @@ if vista_vendedor_activa:
         zonas_filtro,
         limite=5,
     )
+    clientes_vendedor = adapt_actions_dataframe(clientes_vendedor)
     productos_vendedor = siscor_db.productos_a_impulsar(
         mes_actual_desde.isoformat(),
         fecha_maxima.isoformat(),
@@ -645,7 +699,7 @@ if vista_vendedor_activa:
         r2.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
         r3.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
 
-    st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor))
+    st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor, zonas_filtro))
 
     tab_plan, tab_clientes_v, tab_productos_v = st.tabs(["Plan de accion", "Clientes", "Productos"])
     with tab_plan:
@@ -751,7 +805,7 @@ if vista_vendedor_activa:
         ec2.metric("Mes anterior", money(venta_anterior_cliente))
         ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
         ec4.metric("Ultima compra", ultima_compra_texto)
-        st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente))
+        st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente, zonas_filtro))
 
         cprod, ccaidos = st.columns(2)
         with cprod:
@@ -938,6 +992,7 @@ clientes_recuperar = siscor_db.clientes_a_recuperar(
     mes_anterior_hasta.isoformat(),
     zonas_filtro,
 )
+clientes_recuperar = adapt_actions_dataframe(clientes_recuperar)
 productos_impulsar = siscor_db.productos_a_impulsar(
     mes_actual_desde.isoformat(),
     fecha_maxima.isoformat(),
