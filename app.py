@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import html
 import traceback
 
 import pandas as pd
@@ -184,6 +185,71 @@ st.markdown(
         margin-top: 6px;
     }
 
+    .dm-table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--dm-border);
+        border-radius: 8px;
+        background: var(--dm-panel);
+        padding: 8px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.05);
+    }
+
+    .dm-ranking-table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 1120px;
+        font-size: 14px;
+    }
+
+    .dm-ranking-table th {
+        text-align: left;
+        color: var(--dm-muted);
+        font-weight: 750;
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--dm-border);
+        background: #f8fafc;
+    }
+
+    .dm-ranking-table td {
+        padding: 10px;
+        border-bottom: 1px solid #e7edf5;
+        color: var(--dm-text);
+        vertical-align: middle;
+    }
+
+    .dm-ranking-table td.num {
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .dm-progress-cell {
+        min-width: 150px;
+    }
+
+    .dm-progress-track {
+        position: relative;
+        height: 26px;
+        border-radius: 7px;
+        overflow: hidden;
+        background: #eef2f7;
+    }
+
+    .dm-progress-fill {
+        height: 100%;
+        border-radius: 7px;
+    }
+
+    .dm-progress-label {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 8px;
+        font-weight: 800;
+        color: #111827;
+    }
+
     div[data-testid="stPlotlyChart"],
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--dm-border);
@@ -273,21 +339,59 @@ def adapt_actions_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def progress_bar_style(value: object) -> str:
+def progress_colors(value: object) -> tuple[str, str]:
     pct = min(max(numeric_value(value), 0), 100)
     if pct < 70:
-        color = "#ef4444"
-        bg = "#fee2e2"
+        return "#ef4444", "#fee2e2"
     elif pct < 80:
-        color = "#f59e0b"
-        bg = "#fef3c7"
-    else:
-        color = "#16a34a"
-        bg = "#dcfce7"
+        return "#f59e0b", "#fef3c7"
+    return "#16a34a", "#dcfce7"
+
+
+def progress_bar_html(value: object) -> str:
+    pct = min(max(numeric_value(value), 0), 120)
+    fill_pct = min(pct, 100)
+    color, bg = progress_colors(pct)
     return (
-        f"background: linear-gradient(90deg, {color} {pct:.1f}%, {bg} {pct:.1f}%); "
-        "color: #111827; font-weight: 700;"
+        f'<div class="dm-progress-cell"><div class="dm-progress-track" style="background:{bg};">'
+        f'<div class="dm-progress-fill" style="width:{fill_pct:.1f}%; background:{color};"></div>'
+        f'<div class="dm-progress-label">{percent_points(pct)}</div>'
+        "</div></div>"
     )
+
+
+def render_ranking_table(df: pd.DataFrame) -> str:
+    headers = [
+        "Zona",
+        "Ventas mes",
+        "Objetivo",
+        "Cumplimiento",
+        "Ritmo a la fecha",
+        "Proyeccion",
+        "Brecha objetivo",
+        "Diario necesario",
+        "Brecha vs ritmo",
+        "Estado",
+    ]
+    rows = []
+    for _, row in df.iterrows():
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row['zona']))}</td>"
+            f"<td class='num'>{money(row['ventas_mes'])}</td>"
+            f"<td class='num'>{money(row['objetivo'])}</td>"
+            f"<td>{progress_bar_html(row['cumplimiento_pct'])}</td>"
+            f"<td>{progress_bar_html(row['ritmo_pct'])}</td>"
+            f"<td class='num'>{money(row['proyeccion_cierre'])}</td>"
+            f"<td class='num'>{money(row['brecha_objetivo'])}</td>"
+            f"<td class='num'>{money(row['venta_diaria_necesaria'])}</td>"
+            f"<td class='num'>{money(row['brecha_esperada'])}</td>"
+            f"<td>{html.escape(str(row['estado']))}</td>"
+            "</tr>"
+        )
+    header_html = "".join(f"<th>{header}</th>" for header in headers)
+    body_html = "".join(rows)
+    return f'<div class="dm-table-wrap"><table class="dm-ranking-table"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table></div>'
 
 
 def seller_action_message(
@@ -972,40 +1076,7 @@ else:
         ]
     ]
     ranking_df.loc[~ranking_df["tiene_objetivo"], "estado"] = "Sin objetivo"
-    ranking_display_df = ranking_df.drop(columns=["tiene_objetivo"]).rename(
-        columns={
-            "zona": "Zona",
-            "ventas_mes": "Ventas mes",
-            "objetivo": "Objetivo",
-            "cumplimiento_pct": "Cumplimiento",
-            "ritmo_pct": "Ritmo a la fecha",
-            "proyeccion_cierre": "Proyeccion",
-            "brecha_objetivo": "Brecha objetivo",
-            "venta_diaria_necesaria": "Diario necesario",
-            "brecha_esperada": "Brecha vs ritmo",
-            "estado": "Estado",
-        }
-    )
-    ranking_style = (
-        ranking_display_df.style.format(
-            {
-                "Ventas mes": money,
-                "Objetivo": money,
-                "Cumplimiento": percent_points,
-                "Ritmo a la fecha": percent_points,
-                "Proyeccion": money,
-                "Brecha objetivo": money,
-                "Diario necesario": money,
-                "Brecha vs ritmo": money,
-            }
-        )
-        .map(progress_bar_style, subset=["Cumplimiento", "Ritmo a la fecha"])
-        .hide(axis="index")
-    )
-    st.dataframe(
-        ranking_style,
-        use_container_width=True,
-    )
+    st.markdown(render_ranking_table(ranking_df), unsafe_allow_html=True)
 
 st.divider()
 
