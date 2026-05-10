@@ -449,6 +449,15 @@ if zonas_objetivo:
 
 with st.sidebar:
     st.subheader("Segmentadores")
+    vista_vendedor_activa = not current_user.is_admin
+    if current_user.is_admin:
+        modo_vista = st.selectbox(
+            "Vista",
+            options=["Administrador", "Vendedor"],
+            index=0,
+        )
+        vista_vendedor_activa = modo_vista == "Vendedor"
+
     periodo = st.segmented_control(
         "Periodo",
         ["Mes en curso", "Ultimos 30 dias", "Rango"],
@@ -478,12 +487,21 @@ with st.sidebar:
         )
 
     zonas_disponibles = zonas_df["zona"].dropna().astype(str).tolist()
-    if current_user.is_admin:
+    if current_user.is_admin and not vista_vendedor_activa:
         zona_seleccion = st.multiselect(
             "Zonas",
             options=zonas_disponibles,
             placeholder="Todas las zonas",
         )
+    elif current_user.is_admin and vista_vendedor_activa:
+        vendedor_simulado = st.selectbox(
+            "Vendedor",
+            options=zonas_disponibles,
+            index=0 if zonas_disponibles else None,
+            placeholder="Elegir vendedor",
+        )
+        zona_seleccion = [vendedor_simulado] if vendedor_simulado else []
+        st.caption("Vista simulada del vendedor seleccionado")
     else:
         zona_seleccion = [zone for zone in current_user.zones if zone in zonas_disponibles]
         st.text_input("Zona", value=", ".join(zona_seleccion), disabled=True)
@@ -503,7 +521,11 @@ hasta_sql = fecha_hasta.isoformat()
 
 kpi_df = siscor_db.kpis(desde_sql, hasta_sql, zonas_filtro).iloc[0]
 
-if not current_user.is_admin:
+if vista_vendedor_activa:
+    if current_user.is_admin:
+        zona_preview = ", ".join(zonas_filtro) if zonas_filtro else "Sin zona"
+        st.info(f"Vista simulada de vendedor: {zona_preview}")
+
     ventas_mes_vendedor = siscor_db.ventas_por_zona(
         mes_actual_desde.isoformat(),
         fecha_maxima.isoformat(),
