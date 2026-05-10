@@ -231,6 +231,12 @@ def percent(value: object) -> str:
     return f"{float(value) * 100:,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def percent_points(value: object) -> str:
+    if pd.isna(value):
+        return "0,0 %"
+    return f"{float(value):,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def numeric_value(value: object) -> float:
     numeric = pd.to_numeric(value, errors="coerce")
     return 0.0 if pd.isna(numeric) else float(numeric)
@@ -265,6 +271,23 @@ def adapt_actions_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["accion"] = out.apply(lambda row: adapt_action_for_zone(row["accion"], row["zona"]), axis=1)
     return out
+
+
+def progress_bar_style(value: object) -> str:
+    pct = min(max(numeric_value(value), 0), 100)
+    if pct < 70:
+        color = "#ef4444"
+        bg = "#fee2e2"
+    elif pct < 80:
+        color = "#f59e0b"
+        bg = "#fef3c7"
+    else:
+        color = "#16a34a"
+        bg = "#dcfce7"
+    return (
+        f"background: linear-gradient(90deg, {color} {pct:.1f}%, {bg} {pct:.1f}%); "
+        "color: #111827; font-weight: 700;"
+    )
 
 
 def seller_action_message(
@@ -949,33 +972,39 @@ else:
         ]
     ]
     ranking_df.loc[~ranking_df["tiene_objetivo"], "estado"] = "Sin objetivo"
-    st.dataframe(
-        ranking_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
+    ranking_display_df = ranking_df.drop(columns=["tiene_objetivo"]).rename(
+        columns={
             "zona": "Zona",
-            "ventas_mes": st.column_config.NumberColumn("Ventas mes", format="$ %.0f"),
-            "objetivo": st.column_config.NumberColumn("Objetivo", format="$ %.0f"),
-            "cumplimiento_pct": st.column_config.ProgressColumn(
-                "Cumplimiento",
-                min_value=0,
-                max_value=100,
-                format="%.1f %%",
-            ),
-            "ritmo_pct": st.column_config.ProgressColumn(
-                "Ritmo a la fecha",
-                min_value=0,
-                max_value=120,
-                format="%.1f %%",
-            ),
-            "brecha_esperada": st.column_config.NumberColumn("Brecha vs ritmo", format="$ %.0f"),
-            "proyeccion_cierre": st.column_config.NumberColumn("Proyeccion", format="$ %.0f"),
-            "brecha_objetivo": st.column_config.NumberColumn("Brecha objetivo", format="$ %.0f"),
-            "venta_diaria_necesaria": st.column_config.NumberColumn("Diario necesario", format="$ %.0f"),
-            "tiene_objetivo": None,
+            "ventas_mes": "Ventas mes",
+            "objetivo": "Objetivo",
+            "cumplimiento_pct": "Cumplimiento",
+            "ritmo_pct": "Ritmo a la fecha",
+            "proyeccion_cierre": "Proyeccion",
+            "brecha_objetivo": "Brecha objetivo",
+            "venta_diaria_necesaria": "Diario necesario",
+            "brecha_esperada": "Brecha vs ritmo",
             "estado": "Estado",
-        },
+        }
+    )
+    ranking_style = (
+        ranking_display_df.style.format(
+            {
+                "Ventas mes": money,
+                "Objetivo": money,
+                "Cumplimiento": percent_points,
+                "Ritmo a la fecha": percent_points,
+                "Proyeccion": money,
+                "Brecha objetivo": money,
+                "Diario necesario": money,
+                "Brecha vs ritmo": money,
+            }
+        )
+        .map(progress_bar_style, subset=["Cumplimiento", "Ritmo a la fecha"])
+        .hide(axis="index")
+    )
+    st.dataframe(
+        ranking_style,
+        use_container_width=True,
     )
 
 st.divider()
