@@ -88,6 +88,38 @@ st.markdown(
         font-size: 26px;
     }
 
+    .dm-card {
+        min-height: 178px;
+        background: var(--dm-panel);
+        border: 1px solid var(--dm-border);
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
+    }
+
+    .dm-card-label {
+        color: #0f766e;
+        font-size: 12px;
+        font-weight: 750;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+    }
+
+    .dm-card-value {
+        color: var(--dm-text);
+        font-size: 20px;
+        font-weight: 750;
+        line-height: 1.25;
+        margin-bottom: 10px;
+    }
+
+    .dm-card-note {
+        color: var(--dm-muted);
+        font-size: 13px;
+        line-height: 1.35;
+        margin-top: 6px;
+    }
+
     div[data-testid="stPlotlyChart"],
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--dm-border);
@@ -240,6 +272,39 @@ def build_action_radar(
     radar["orden"] = radar["prioridad"].map(priority_order).fillna(9)
     radar = radar.sort_values(["orden", "impacto_estimado"], ascending=[True, False]).head(limit)
     return radar.drop(columns=["orden"])
+
+
+def build_daily_plan(radar: pd.DataFrame, limit: int = 3) -> pd.DataFrame:
+    if radar.empty:
+        return pd.DataFrame(columns=["orden", "prioridad", "titulo", "detalle", "accion", "impacto_estimado"])
+
+    labels = ["Primero", "Segundo", "Tercero"]
+    plan_rows: list[dict[str, object]] = []
+    for idx, (_, row) in enumerate(radar.head(limit).iterrows()):
+        frente = str(row["frente"])
+        foco = str(row["foco"])
+        zona = str(row["zona"])
+        if frente == "Zona":
+            titulo = f"Levantar {zona}"
+            detalle = foco
+        elif frente == "Cliente":
+            titulo = "Recuperar cliente"
+            detalle = f"{zona} - {foco}"
+        else:
+            titulo = "Empujar producto"
+            detalle = foco
+
+        plan_rows.append(
+            {
+                "orden": labels[idx],
+                "prioridad": row["prioridad"],
+                "titulo": titulo,
+                "detalle": detalle,
+                "accion": row["accion"],
+                "impacto_estimado": row["impacto_estimado"],
+            }
+        )
+    return pd.DataFrame(plan_rows)
 
 
 def login_screen() -> None:
@@ -770,6 +835,25 @@ else:
     a1.metric("Acciones altas", number(alta_prioridad))
     a2.metric("Mayor oportunidad", money(impacto_principal))
     a3.metric("Zonas a empujar", number(zonas_priorizadas))
+
+    plan_diario = build_daily_plan(radar_acciones)
+    st.markdown("#### Plan diario recomendado")
+    plan_cols = st.columns(len(plan_diario))
+    for col, (_, row) in zip(plan_cols, plan_diario.iterrows()):
+        with col:
+            st.markdown(
+                f"""
+                <div class="dm-card">
+                    <div class="dm-card-label">{row['orden']} - {row['prioridad']}</div>
+                    <div class="dm-card-value">{row['titulo']}</div>
+                    <div class="dm-card-note">{row['detalle']}</div>
+                    <div class="dm-card-note">{row['accion']}</div>
+                    <div class="dm-card-note">Impacto estimado: {money(row['impacto_estimado'])}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
     st.dataframe(
         radar_acciones,
         use_container_width=True,
