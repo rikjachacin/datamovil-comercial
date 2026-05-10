@@ -338,16 +338,6 @@ def build_executive_brief(
     return "\n".join(lines)
 
 
-def direction_status(team_pace: float, projected_gap: float) -> tuple[str, str]:
-    if team_pace >= 1:
-        return "En camino", "Mantener disciplina comercial y proteger reposicion."
-    if team_pace >= 0.85:
-        return "Recuperable", "Concentrar apoyo puntual en zonas bajo ritmo."
-    if projected_gap < 0:
-        return "Riesgo alto", "Activar plan diario y seguimiento cercano por vendedor."
-    return "En observacion", "Revisar objetivos y calidad de la informacion disponible."
-
-
 def login_screen() -> None:
     st.markdown(
         """
@@ -742,7 +732,7 @@ ventas_objetivo = siscor_db.ventas_por_zona(
     zonas_objetivo,
 )
 
-st.subheader("Direccion")
+st.subheader("Objetivos y ritmo del mes")
 desempeno_df = pd.DataFrame()
 total_ventas_mes = 0.0
 total_objetivo = 0.0
@@ -783,23 +773,6 @@ else:
     cumplimiento_total = total_ventas_mes / total_objetivo if total_objetivo else 0
     ritmo_total = total_ventas_mes / total_objetivo_esperado if total_objetivo_esperado else 0
     zonas_en_ritmo = int((desempeno_con_objetivo["ritmo"] >= 1).sum())
-    estado_direccion, decision_direccion = direction_status(
-        ritmo_total,
-        total_proyeccion - total_objetivo,
-    )
-
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Estado del mes", estado_direccion, percent(ritmo_total))
-    d2.metric("Proyeccion cierre", money(total_proyeccion))
-    d3.metric("Brecha proyectada", money(total_proyeccion - total_objetivo))
-    d4.metric("Diario necesario", money(venta_diaria_necesaria))
-    st.info(f"Decision sugerida: {decision_direccion}")
-    st.caption(
-        "La herramienta consulta informacion comercial de SisCor en modo solo lectura. "
-        "No modifica facturas, clientes, productos ni stock."
-    )
-
-    st.subheader("Objetivos y ritmo del mes")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Cumplimiento mensual", percent(cumplimiento_total))
