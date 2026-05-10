@@ -6,13 +6,13 @@ from cryptography.fernet import Fernet
 
 
 DATA_DIR = Path("data")
-FILES = ("facturas.csv", "factura_items.csv")
+FILES = ("facturas.csv", "factura_items.csv", "objetivos.csv")
 KEY_PATH = DATA_DIR / "snapshot.key"
 
 
 def main() -> None:
     DATA_DIR.mkdir(exist_ok=True)
-    key = Fernet.generate_key()
+    key = KEY_PATH.read_bytes().strip() if KEY_PATH.exists() else Fernet.generate_key()
     cipher = Fernet(key)
 
     for filename in FILES:

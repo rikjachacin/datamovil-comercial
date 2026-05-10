@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from io import BytesIO
 from calendar import monthrange
 from pathlib import Path
 
 import pandas as pd
+import streamlit as st
+from cryptography.fernet import Fernet, InvalidToken
+from streamlit.errors import StreamlitSecretNotFoundError
 
 
 OBJECTIVES_PATH = Path("data/objetivos.csv")
+ENCRYPTED_OBJECTIVES_PATH = Path("data/objetivos.csv.enc")
+SNAPSHOT_KEY_PATH = Path("data/snapshot.key")
 REQUIRED_COLUMNS = ("mes", "zona", "objetivo")
 
 
@@ -27,10 +33,20 @@ def remaining_days(fecha: object) -> int:
 
 
 def load_objectives(path: Path = OBJECTIVES_PATH) -> pd.DataFrame:
-    if not path.exists():
+    if path.exists():
+        df = pd.read_csv(path)
+    elif ENCRYPTED_OBJECTIVES_PATH.exists():
+        key = _snapshot_key()
+        if not key:
+            return pd.DataFrame(columns=REQUIRED_COLUMNS)
+        try:
+            data = Fernet(key.encode("utf-8")).decrypt(ENCRYPTED_OBJECTIVES_PATH.read_bytes())
+        except (InvalidToken, ValueError) as exc:
+            raise RuntimeError("La clave data.snapshot_key no puede abrir los objetivos cifrados.") from exc
+        df = pd.read_csv(BytesIO(data))
+    else:
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-    df = pd.read_csv(path)
     missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
     if missing:
         raise RuntimeError(f"Faltan columnas en {path}: {', '.join(missing)}")
@@ -40,6 +56,18 @@ def load_objectives(path: Path = OBJECTIVES_PATH) -> pd.DataFrame:
     out["zona"] = out["zona"].astype(str).str.strip()
     out["objetivo"] = pd.to_numeric(out["objetivo"], errors="coerce").fillna(0)
     return out
+
+
+def _snapshot_key() -> str | None:
+    try:
+        key = st.secrets.get("data", {}).get("snapshot_key")
+        if key:
+            return str(key).strip()
+    except StreamlitSecretNotFoundError:
+        pass
+    if SNAPSHOT_KEY_PATH.exists():
+        return SNAPSHOT_KEY_PATH.read_text(encoding="utf-8").strip()
+    return None
 
 
 def monthly_performance(
