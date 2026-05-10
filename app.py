@@ -24,10 +24,12 @@ st.markdown(
         --dm-bg: #f4f7fb;
         --dm-panel: #ffffff;
         --dm-border: #d8e1ed;
+        --dm-border-strong: #b9c8da;
         --dm-text: #182536;
         --dm-muted: #66758a;
         --dm-accent: #0f7b6c;
         --dm-accent-2: #1f5eff;
+        --dm-sidebar: #f8fbfd;
     }
 
     .stApp {
@@ -43,8 +45,45 @@ st.markdown(
     }
 
     [data-testid="stSidebar"] {
-        background: #ffffff;
+        background:
+            linear-gradient(180deg, #ffffff 0%, var(--dm-sidebar) 62%, #eef5f7 100%);
         border-right: 1px solid var(--dm-border);
+        box-shadow: 8px 0 28px rgba(20, 36, 58, 0.06);
+    }
+
+    [data-testid="stSidebar"] section {
+        padding-top: 1.3rem;
+    }
+
+    [data-testid="stSidebar"] h3 {
+        font-size: 16px;
+        font-weight: 800;
+        color: var(--dm-text);
+        margin-bottom: 0.45rem;
+    }
+
+    [data-testid="stSidebar"] h3::before {
+        content: "";
+        display: inline-block;
+        width: 4px;
+        height: 16px;
+        margin-right: 8px;
+        border-radius: 8px;
+        background: linear-gradient(180deg, var(--dm-accent), #2c74d6);
+        vertical-align: -3px;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+        color: var(--dm-muted);
+    }
+
+    [data-testid="stSidebar"] p {
+        color: var(--dm-text);
+    }
+
+    [data-testid="stSidebar"] hr {
+        margin: 1.35rem 0;
+        border-color: var(--dm-border);
     }
 
     .dm-header {
@@ -86,6 +125,31 @@ st.markdown(
     [data-testid="stMetricValue"] {
         color: var(--dm-text);
         font-size: 26px;
+    }
+
+    .stButton button {
+        border-radius: 8px;
+        border: 1px solid var(--dm-border-strong);
+        background: #ffffff;
+        color: var(--dm-text);
+        font-weight: 650;
+        transition: all 120ms ease;
+    }
+
+    .stButton button:hover {
+        border-color: var(--dm-accent);
+        color: var(--dm-accent);
+        box-shadow: 0 8px 18px rgba(15, 123, 108, 0.12);
+    }
+
+    [data-baseweb="input"],
+    [data-baseweb="select"],
+    [data-baseweb="popover"] {
+        border-radius: 8px;
+    }
+
+    [data-baseweb="input"] {
+        border-color: var(--dm-border);
     }
 
     .dm-card {
