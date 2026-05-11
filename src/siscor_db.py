@@ -192,6 +192,8 @@ def _snapshot_filtered_facturas(
     df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
     df = df[~df["zona"].isin(EXCLUDED_COMMERCIAL_ZONES)]
     df = df[df["tipo"].isin(COMMERCIAL_DOCUMENT_TYPES)]
+    if "autorizado" in df.columns:
+        df = df[df["autorizado"].astype(str).str.lower().isin(("true", "1", "si", "sí"))]
 
     if fecha_desde:
         df = df[df["fecha"].dt.date >= pd.to_datetime(fecha_desde).date()]
@@ -229,7 +231,8 @@ def month_options() -> pd.DataFrame:
             MIN(CAST(fecha AS date)) AS fecha_minima,
             MAX(CAST(fecha AS date)) AS fecha_maxima
         FROM dbo.cli_factura
-        WHERE ISNULL(Anulado, 0) = 0;
+        WHERE ISNULL(Anulado, 0) = 0
+          AND ISNULL(autorizado, 0) = 1;
         """
     )
 
@@ -249,6 +252,10 @@ def _commercial_zone_filter(alias: str) -> str:
 def _commercial_document_filter(alias: str) -> str:
     included = ", ".join(f"'{doc_type}'" for doc_type in COMMERCIAL_DOCUMENT_TYPES)
     return f" AND {alias}.tipo IN ({included})"
+
+
+def _authorized_invoice_filter(alias: str) -> str:
+    return f" AND ISNULL({alias}.autorizado, 0) = 1"
 
 
 def _signed_total(alias: str, column: str = "total") -> str:
@@ -271,6 +278,7 @@ def zonas() -> pd.DataFrame:
             COALESCE(NULLIF(zona, ''), 'Sin zona') AS zona
         FROM dbo.cli_factura
         WHERE ISNULL(Anulado, 0) = 0
+          AND ISNULL(autorizado, 0) = 1
           {_commercial_zone_filter("dbo.cli_factura")}
           {_commercial_document_filter("dbo.cli_factura")}
         ORDER BY zona;
@@ -304,6 +312,7 @@ def kpis(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ())
             AVG({_signed_total("f", "total")}) AS ticket_promedio
         FROM dbo.cli_factura f
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
@@ -336,6 +345,7 @@ def ventas_por_dia(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, 
             COUNT(*) AS comprobantes
         FROM dbo.cli_factura f
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
@@ -370,6 +380,7 @@ def ventas_por_mes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, 
             COUNT(*) AS comprobantes
         FROM dbo.cli_factura f
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
@@ -407,6 +418,7 @@ def ventas_por_zona(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str,
             COUNT(DISTINCT f.id_cliente) AS clientes
         FROM dbo.cli_factura f
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
@@ -443,6 +455,7 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
             COUNT(*) AS comprobantes
         FROM dbo.cli_factura f
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
@@ -486,6 +499,7 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
         INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
         LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
@@ -522,6 +536,7 @@ def clientes_a_recuperar(
                 SUM({_signed_total("f", "total")}) AS venta_mes
             FROM dbo.cli_factura f
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
@@ -536,6 +551,7 @@ def clientes_a_recuperar(
                 SUM({_signed_total("f", "total")}) AS venta_mes_anterior
             FROM dbo.cli_factura f
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
@@ -639,6 +655,7 @@ def productos_a_impulsar(
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
@@ -655,6 +672,7 @@ def productos_a_impulsar(
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
@@ -752,6 +770,7 @@ def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
             COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente
         FROM dbo.cli_factura f
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
           {zona_sql}
@@ -787,6 +806,7 @@ def estrategia_cliente(
                 CAST(f.fecha AS date) AS fecha
             FROM dbo.cli_factura f
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
               AND (
                     CAST(f.fecha AS date) BETWEEN ? AND ?
@@ -825,6 +845,7 @@ def estrategia_cliente(
         INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
         LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
         WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
           AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
@@ -847,6 +868,7 @@ def estrategia_cliente(
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
@@ -863,6 +885,7 @@ def estrategia_cliente(
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
               AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
@@ -979,9 +1002,11 @@ def export_facturas_snapshot(months_back: int = 18) -> pd.DataFrame:
             COALESCE(NULLIF(cliente, ''), CONCAT('Cliente ', id_cliente)) AS cliente,
             COALESCE(NULLIF(zona, ''), 'Sin zona') AS zona,
             CAST(total AS decimal(18, 2)) AS total,
-            CAST(subtotal AS decimal(18, 2)) AS subtotal
+            CAST(subtotal AS decimal(18, 2)) AS subtotal,
+            CAST(autorizado AS bit) AS autorizado
         FROM dbo.cli_factura
         WHERE ISNULL(Anulado, 0) = 0
+          AND ISNULL(autorizado, 0) = 1
           AND fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
           AND tipo IN ('FC', 'NC', 'ND');
@@ -1004,6 +1029,7 @@ def export_factura_items_snapshot(months_back: int = 18) -> pd.DataFrame:
         INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
         LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
         WHERE ISNULL(f.Anulado, 0) = 0
+          AND ISNULL(f.autorizado, 0) = 1
           AND f.fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(f.zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
           AND f.tipo IN ('FC', 'NC', 'ND');
