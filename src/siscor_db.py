@@ -837,24 +837,60 @@ def estrategia_cliente(
     productos = read_sql(
         f"""
         SET NOCOUNT ON;
+        WITH productos AS (
+            SELECT
+                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
+                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
+                    ELSE 0 END) AS cantidad,
+                SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
+                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
+                    ELSE 0 END) AS total,
+                SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
+                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
+                    ELSE 0 END) AS cantidad_anterior,
+                SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
+                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
+                    ELSE 0 END) AS total_anterior
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+              AND (
+                    CAST(f.fecha AS date) BETWEEN ? AND ?
+                 OR CAST(f.fecha AS date) BETWEEN ? AND ?
+              )
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              {zona_sql}
+            GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        )
         SELECT TOP (?)
-            COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
-            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad,
-            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS total
-        FROM dbo.cli_factura_item fi
-        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
-        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
-        WHERE ISNULL(f.Anulado, 0) = 0
-          {_authorized_invoice_filter("f")}
-          AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
-          AND CAST(f.fecha AS date) BETWEEN ? AND ?
-          {_commercial_zone_filter("f")}
-          {_commercial_document_filter("f")}
-          {zona_sql}
-        GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
-        ORDER BY total DESC;
+            producto,
+            CASE WHEN total <> 0 THEN cantidad ELSE cantidad_anterior END AS cantidad,
+            CASE WHEN total <> 0 THEN total ELSE total_anterior END AS total
+        FROM productos
+        ORDER BY CASE WHEN total <> 0 THEN total ELSE total_anterior END DESC;
         """,
-        (limite_productos, cliente, mes_actual_desde, fecha_hasta, *zona_params),
+        (
+            mes_actual_desde,
+            fecha_hasta,
+            mes_actual_desde,
+            fecha_hasta,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            cliente,
+            mes_actual_desde,
+            fecha_hasta,
+            mes_anterior_desde,
+            mes_anterior_hasta,
+            *zona_params,
+            limite_productos,
+        ),
     )
     caidos = read_sql(
         f"""
@@ -951,12 +987,12 @@ def _estrategia_cliente_from_frames(
             .agg(**{qty_name: (qty_name, "sum"), total_name: (total_name, "sum")})
         )
 
-    productos = (
-        product_sales(actual_cliente, "cantidad", "total")
-        .sort_values("total", ascending=False)
-        .head(limite_productos)
-        .loc[:, ["producto", "cantidad", "total"]]
-    )
+    productos_base = product_sales(actual_cliente, "cantidad", "total")
+    if productos_base.empty:
+        productos_base = product_sales(anterior_cliente, "cantidad", "total")
+    productos = productos_base.sort_values("total", ascending=False).head(limite_productos).loc[
+        :, ["producto", "cantidad", "total"]
+    ]
     actuales = product_sales(actual_cliente, "cantidad_mes", "venta_mes")
     anteriores = product_sales(anterior_cliente, "cantidad_mes_anterior", "venta_mes_anterior")
     if anteriores.empty:

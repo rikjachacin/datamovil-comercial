@@ -810,6 +810,7 @@ if vista_vendedor_activa:
         zonas_filtro,
         limite=8,
     )
+    clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
 
     st.subheader("Mi avance del mes")
     if vendedor_row is None:
@@ -895,6 +896,7 @@ if vista_vendedor_activa:
             [
                 clientes_vendedor.get("cliente", pd.Series(dtype=str)),
                 top_clientes_vendedor.get("cliente", pd.Series(dtype=str)),
+                clientes_catalogo_vendedor.get("cliente", pd.Series(dtype=str)),
             ],
             ignore_index=True,
         )
@@ -911,7 +913,7 @@ if vista_vendedor_activa:
             placeholder="Buscar cliente",
         )
     else:
-        st.info("No hay clientes con movimiento suficiente para generar estrategia en este periodo.")
+        st.info("No hay clientes disponibles para generar estrategia en esta zona.")
 
     if cliente_seleccionado:
         resumen_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
