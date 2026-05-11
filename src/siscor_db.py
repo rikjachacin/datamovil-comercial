@@ -244,6 +244,13 @@ def _zona_filter(alias: str, zonas: tuple[str, ...]) -> tuple[str, tuple[str, ..
     return f" AND COALESCE(NULLIF({alias}.zona, ''), 'Sin zona') IN ({placeholders})", zonas
 
 
+def _current_client_zone_filter(zones_alias: str, zonas: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    if not zonas:
+        return "", ()
+    placeholders = ", ".join("?" for _ in zonas)
+    return f" AND COALESCE(NULLIF({zones_alias}.descripcion, ''), 'Sin zona') IN ({placeholders})", zonas
+
+
 def _commercial_zone_filter(alias: str) -> str:
     excluded = ", ".join(f"'{zone}'" for zone in EXCLUDED_COMMERCIAL_ZONES)
     return f" AND COALESCE(NULLIF({alias}.zona, ''), 'Sin zona') NOT IN ({excluded})"
@@ -524,39 +531,51 @@ def clientes_a_recuperar(
         anterior = _snapshot_filtered_facturas(mes_anterior_desde, mes_anterior_hasta, zonas_filtro)
         return _clientes_a_recuperar_from_frames(actual, anterior, limite)
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
     return read_sql(
         f"""
         SET NOCOUNT ON;
-        WITH actual AS (
+        WITH cartera AS (
+            SELECT DISTINCT
+                c.id_cliente,
+                COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente,
+                COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') AS zona
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+              {zona_sql}
+        ),
+        actual AS (
             SELECT
                 f.id_cliente,
-                COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente,
-                COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
+                c.cliente,
+                c.zona,
                 SUM({_signed_total("f", "total")}) AS venta_mes
             FROM dbo.cli_factura f
+            INNER JOIN cartera c ON c.id_cliente = f.id_cliente
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-              {zona_sql}
-            GROUP BY f.id_cliente, COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)), COALESCE(NULLIF(f.zona, ''), 'Sin zona')
+            GROUP BY f.id_cliente, c.cliente, c.zona
         ),
         anterior AS (
             SELECT
                 f.id_cliente,
-                COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente,
-                COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
+                c.cliente,
+                c.zona,
                 SUM({_signed_total("f", "total")}) AS venta_mes_anterior
             FROM dbo.cli_factura f
+            INNER JOIN cartera c ON c.id_cliente = f.id_cliente
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-              {zona_sql}
-            GROUP BY f.id_cliente, COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)), COALESCE(NULLIF(f.zona, ''), 'Sin zona')
+            GROUP BY f.id_cliente, c.cliente, c.zona
         )
         SELECT TOP (?)
             COALESCE(a.cliente, p.cliente) AS cliente,
@@ -578,12 +597,11 @@ def clientes_a_recuperar(
         ORDER BY variacion ASC;
         """,
         (
+            *zona_params,
             mes_actual_desde,
             fecha_hasta,
-            *zona_params,
             mes_anterior_desde,
             mes_anterior_hasta,
-            *zona_params,
             limite,
         ),
     )
@@ -762,17 +780,17 @@ def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
             return pd.DataFrame(columns=["cliente"])
         return pd.DataFrame({"cliente": sorted(df["cliente"].dropna().astype(str).unique())})
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
     return read_sql(
         f"""
         SET NOCOUNT ON;
         SELECT DISTINCT
-            COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente
-        FROM dbo.cli_factura f
-        WHERE ISNULL(f.Anulado, 0) = 0
-          {_authorized_invoice_filter("f")}
-          {_commercial_zone_filter("f")}
-          {_commercial_document_filter("f")}
+            COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente
+        FROM dbo.cli_cliente c
+        INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+        LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+        WHERE ISNULL(c.activo, 0) = 1
+          AND ISNULL(cs.activo, 0) = 1
           {zona_sql}
         ORDER BY cliente;
         """,
@@ -794,27 +812,58 @@ def estrategia_cliente(
         anterior = _snapshot_filtered_facturas(mes_anterior_desde, mes_anterior_hasta, zonas_filtro)
         return _estrategia_cliente_from_frames(cliente, actual, anterior, limite_productos)
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
+    cliente_ids_df = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT DISTINCT
+            c.id_cliente
+        FROM dbo.cli_cliente c
+        INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+        LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+        WHERE ISNULL(c.activo, 0) = 1
+          AND ISNULL(cs.activo, 0) = 1
+          AND COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) = ?
+          {zona_sql};
+        """,
+        (cliente, *zona_params),
+    )
+    if cliente_ids_df.empty:
+        resumen = pd.DataFrame(
+            {
+                "venta_mes": [0],
+                "venta_mes_anterior": [0],
+                "comprobantes_mes": [0],
+                "ultima_compra": [None],
+            }
+        )
+        productos = pd.DataFrame(columns=["producto", "cantidad", "total"])
+        caidos = pd.DataFrame(columns=["producto", "venta_mes", "venta_mes_anterior", "variacion"])
+        return resumen, productos, caidos
+
+    cliente_ids = tuple(int(value) for value in cliente_ids_df["id_cliente"].dropna().unique())
+    cliente_placeholders = ", ".join("?" for _ in cliente_ids)
+
     resumen = read_sql(
         f"""
         SET NOCOUNT ON;
         WITH base AS (
             SELECT
-                CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ? THEN 'actual' ELSE 'anterior' END AS periodo,
+                CASE
+                    WHEN CAST(f.fecha AS date) BETWEEN ? AND ? THEN 'actual'
+                    WHEN CAST(f.fecha AS date) BETWEEN ? AND ? THEN 'anterior'
+                    ELSE 'historico'
+                END AS periodo,
                 {_signed_total("f", "total")} AS total,
                 f.id_facturacion,
                 CAST(f.fecha AS date) AS fecha
             FROM dbo.cli_factura f
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
-              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
-              AND (
-                    CAST(f.fecha AS date) BETWEEN ? AND ?
-                 OR CAST(f.fecha AS date) BETWEEN ? AND ?
-              )
+              AND f.id_cliente IN ({cliente_placeholders})
+              AND f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-              {zona_sql}
         )
         SELECT
             ISNULL(SUM(CASE WHEN periodo = 'actual' THEN total ELSE 0 END), 0) AS venta_mes,
@@ -826,12 +875,9 @@ def estrategia_cliente(
         (
             mes_actual_desde,
             fecha_hasta,
-            cliente,
-            mes_actual_desde,
-            fecha_hasta,
             mes_anterior_desde,
             mes_anterior_hasta,
-            *zona_params,
+            *cliente_ids,
         ),
     )
     productos = read_sql(
@@ -852,27 +898,38 @@ def estrategia_cliente(
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
                     THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
                     ELSE 0 END) AS total_anterior
+                ,
+                SUM(CASE WHEN f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
+                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
+                    ELSE 0 END) AS cantidad_historica,
+                SUM(CASE WHEN f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
+                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
+                    ELSE 0 END) AS total_historico
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
-              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
-              AND (
-                    CAST(f.fecha AS date) BETWEEN ? AND ?
-                 OR CAST(f.fecha AS date) BETWEEN ? AND ?
-              )
+              AND f.id_cliente IN ({cliente_placeholders})
+              AND f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-              {zona_sql}
             GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
         )
         SELECT TOP (?)
             producto,
-            CASE WHEN total <> 0 THEN cantidad ELSE cantidad_anterior END AS cantidad,
-            CASE WHEN total <> 0 THEN total ELSE total_anterior END AS total
+            CASE
+                WHEN total <> 0 THEN cantidad
+                WHEN total_anterior <> 0 THEN cantidad_anterior
+                ELSE cantidad_historica
+            END AS cantidad,
+            CASE
+                WHEN total <> 0 THEN total
+                WHEN total_anterior <> 0 THEN total_anterior
+                ELSE total_historico
+            END AS total
         FROM productos
-        ORDER BY CASE WHEN total <> 0 THEN total ELSE total_anterior END DESC;
+        ORDER BY CASE WHEN total <> 0 THEN total WHEN total_anterior <> 0 THEN total_anterior ELSE total_historico END DESC;
         """,
         (
             mes_actual_desde,
@@ -883,12 +940,7 @@ def estrategia_cliente(
             mes_anterior_hasta,
             mes_anterior_desde,
             mes_anterior_hasta,
-            cliente,
-            mes_actual_desde,
-            fecha_hasta,
-            mes_anterior_desde,
-            mes_anterior_hasta,
-            *zona_params,
+            *cliente_ids,
             limite_productos,
         ),
     )
@@ -905,11 +957,10 @@ def estrategia_cliente(
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
-              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+              AND f.id_cliente IN ({cliente_placeholders})
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-              {zona_sql}
             GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
         ),
         anterior AS (
@@ -922,11 +973,10 @@ def estrategia_cliente(
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
-              AND COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) = ?
+              AND f.id_cliente IN ({cliente_placeholders})
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-              {zona_sql}
             GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
         )
         SELECT TOP (?)
@@ -940,14 +990,12 @@ def estrategia_cliente(
         ORDER BY variacion ASC;
         """,
         (
-            cliente,
+            *cliente_ids,
             mes_actual_desde,
             fecha_hasta,
-            *zona_params,
-            cliente,
+            *cliente_ids,
             mes_anterior_desde,
             mes_anterior_hasta,
-            *zona_params,
             limite_productos,
         ),
     )

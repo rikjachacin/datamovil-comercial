@@ -430,6 +430,8 @@ def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFra
     venta_anterior = numeric_value(resumen.get("venta_mes_anterior"))
     variacion = venta_mes - venta_anterior
     is_telemarketing = is_telemarketing_zone(zonas)
+    ultima_compra = resumen.get("ultima_compra")
+    tiene_historial = not pd.isna(ultima_compra)
 
     if venta_anterior <= 0 and venta_mes > 0:
         message = f"{cliente} aparece activo este mes. Conviene sostener frecuencia y revisar productos complementarios."
@@ -438,6 +440,11 @@ def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFra
             message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para llamada o WhatsApp."
         else:
             message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para contacto o visita."
+    elif venta_mes <= 0 and venta_anterior <= 0 and tiene_historial:
+        if is_telemarketing:
+            message = f"{cliente} no registra compra reciente. Ultima compra: {ultima_compra}. Prioridad para reactivar por llamada o WhatsApp."
+        else:
+            message = f"{cliente} no registra compra reciente. Ultima compra: {ultima_compra}. Prioridad para reactivar contacto o visita."
     elif variacion < 0:
         if is_telemarketing:
             message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar el contacto en recuperar rotacion."
