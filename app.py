@@ -828,11 +828,12 @@ if vista_vendedor_activa:
     if vendedor_row is None:
         st.warning("Tu zona no tiene objetivo cargado para este mes.")
     else:
-        v1, v2, v3, v4 = st.columns(4)
+        v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("Ventas mes", money(vendedor_row["ventas_mes"]))
         v2.metric("Objetivo", money(vendedor_row["objetivo"]))
         v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
         v4.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
+        v5.metric("Dias para vender", number(dias_restantes))
 
         r1, r2, r3 = st.columns(3)
         r1.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
@@ -1045,10 +1046,11 @@ else:
     c3.metric("Ritmo del equipo", percent(ritmo_total))
     c4.metric("Zonas en ritmo", f"{zonas_en_ritmo}/{len(desempeno_con_objetivo)}")
 
-    p1, p2, p3 = st.columns(3)
+    p1, p2, p3, p4 = st.columns(4)
     p1.metric("Proyeccion de cierre", money(total_proyeccion))
     p2.metric("Brecha proyectada", money(total_proyeccion - total_objetivo))
     p3.metric("Venta diaria necesaria", money(venta_diaria_necesaria))
+    p4.metric("Dias para vender", number(dias_restantes))
 
     insights = objectives.executive_insights(desempeno_df)
     leader = insights["leader"]
