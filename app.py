@@ -528,18 +528,18 @@ def build_action_radar(
             )
 
     if not rows:
-        return pd.DataFrame(columns=["prioridad", "frente", "zona", "foco", "impacto_estimado", "accion"])
+        return pd.DataFrame(columns=["prioridad", "frente", "zona", "foco", "accion"])
 
     radar = pd.DataFrame(rows)
     priority_order = {"Alta": 0, "Media": 1, "Baja": 2}
     radar["orden"] = radar["prioridad"].map(priority_order).fillna(9)
     radar = radar.sort_values(["orden", "impacto_estimado"], ascending=[True, False]).head(limit)
-    return radar.drop(columns=["orden"])
+    return radar.drop(columns=["orden", "impacto_estimado"])
 
 
 def build_daily_plan(radar: pd.DataFrame, limit: int = 3) -> pd.DataFrame:
     if radar.empty:
-        return pd.DataFrame(columns=["orden", "prioridad", "titulo", "detalle", "accion", "impacto_estimado"])
+        return pd.DataFrame(columns=["orden", "prioridad", "titulo", "detalle", "accion"])
 
     labels = ["Primero", "Segundo", "Tercero"]
     plan_rows: list[dict[str, object]] = []
@@ -564,7 +564,6 @@ def build_daily_plan(radar: pd.DataFrame, limit: int = 3) -> pd.DataFrame:
                 "titulo": titulo,
                 "detalle": detalle,
                 "accion": row["accion"],
-                "impacto_estimado": row["impacto_estimado"],
             }
         )
     return pd.DataFrame(plan_rows)
@@ -593,7 +592,7 @@ def build_executive_brief(
         for _, row in plan.iterrows():
             lines.append(
                 f"- {row['orden']}: {row['titulo']} | {row['detalle']} | "
-                f"{row['accion']} | impacto {money(row['impacto_estimado'])}."
+                f"{row['accion']}."
             )
     else:
         lines.append("No hay prioridades criticas detectadas para hoy.")
@@ -1143,11 +1142,11 @@ if radar_acciones.empty:
     st.info("No hay alertas comerciales relevantes para este periodo.")
 else:
     alta_prioridad = int((radar_acciones["prioridad"] == "Alta").sum())
-    impacto_principal = radar_acciones["impacto_estimado"].max()
     zonas_priorizadas = radar_acciones.loc[radar_acciones["frente"] == "Zona", "zona"].nunique()
+    clientes_priorizados = radar_acciones.loc[radar_acciones["frente"] == "Cliente", "foco"].nunique()
     a1, a2, a3 = st.columns(3)
     a1.metric("Acciones altas", number(alta_prioridad))
-    a2.metric("Mayor oportunidad", money(impacto_principal))
+    a2.metric("Clientes a recuperar", number(clientes_priorizados))
     a3.metric("Zonas a empujar", number(zonas_priorizadas))
 
     plan_diario = build_daily_plan(radar_acciones)
@@ -1162,7 +1161,6 @@ else:
                     <div class="dm-card-value">{row['titulo']}</div>
                     <div class="dm-card-note">{row['detalle']}</div>
                     <div class="dm-card-note">{row['accion']}</div>
-                    <div class="dm-card-note">Impacto estimado: {money(row['impacto_estimado'])}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1194,7 +1192,6 @@ else:
             "frente": "Frente",
             "zona": "Zona",
             "foco": "Foco",
-            "impacto_estimado": st.column_config.NumberColumn("Impacto estimado", format="$ %.0f"),
             "accion": "Accion sugerida",
         },
     )
