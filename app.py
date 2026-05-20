@@ -769,6 +769,11 @@ if fecha_desde > fecha_hasta:
 
 desde_sql = fecha_desde.isoformat()
 hasta_sql = fecha_hasta.isoformat()
+periodo_dias = (fecha_hasta - fecha_desde).days + 1
+comparacion_hasta = fecha_desde - timedelta(days=1)
+comparacion_desde = comparacion_hasta - timedelta(days=periodo_dias - 1)
+comparacion_desde_sql = comparacion_desde.isoformat()
+comparacion_hasta_sql = comparacion_hasta.isoformat()
 
 kpi_df = siscor_db.kpis(desde_sql, hasta_sql, zonas_filtro).iloc[0]
 
@@ -795,25 +800,25 @@ if vista_vendedor_activa:
 
     vendedor_row = None if desempeno_vendedor.empty else desempeno_vendedor.iloc[0]
     clientes_vendedor = siscor_db.clientes_a_recuperar(
-        mes_actual_desde.isoformat(),
-        fecha_maxima.isoformat(),
-        mes_anterior_desde.isoformat(),
-        mes_anterior_hasta.isoformat(),
+        desde_sql,
+        hasta_sql,
+        comparacion_desde_sql,
+        comparacion_hasta_sql,
         zonas_filtro,
         limite=5,
     )
     clientes_vendedor = adapt_actions_dataframe(clientes_vendedor)
     productos_vendedor = siscor_db.productos_a_impulsar(
-        mes_actual_desde.isoformat(),
-        fecha_maxima.isoformat(),
-        mes_anterior_desde.isoformat(),
-        mes_anterior_hasta.isoformat(),
+        desde_sql,
+        hasta_sql,
+        comparacion_desde_sql,
+        comparacion_hasta_sql,
         zonas_filtro,
         limite=5,
     )
     top_clientes_vendedor = siscor_db.top_clientes(
-        mes_actual_desde.isoformat(),
-        fecha_maxima.isoformat(),
+        desde_sql,
+        hasta_sql,
         zonas_filtro,
         limite=8,
     )
@@ -846,8 +851,8 @@ if vista_vendedor_activa:
             column_config={
                 "cliente": "Cliente",
                 "zona": "Zona",
-                "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
-                "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+                "venta_mes": st.column_config.NumberColumn("Venta periodo", format="$ %.0f"),
+                "venta_mes_anterior": st.column_config.NumberColumn("Periodo anterior", format="$ %.0f"),
                 "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
                 "accion": "Accion sugerida",
             },
@@ -859,10 +864,10 @@ if vista_vendedor_activa:
             hide_index=True,
             column_config={
                 "producto": "Producto",
-                "cantidad_mes": st.column_config.NumberColumn("Cantidad mes", format="%.2f"),
+                "cantidad_mes": st.column_config.NumberColumn("Cantidad periodo", format="%.2f"),
                 "cantidad_mes_anterior": st.column_config.NumberColumn("Cantidad anterior", format="%.2f"),
-                "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
-                "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+                "venta_mes": st.column_config.NumberColumn("Venta periodo", format="$ %.0f"),
+                "venta_mes_anterior": st.column_config.NumberColumn("Periodo anterior", format="$ %.0f"),
                 "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
                 "accion": "Accion sugerida",
             },
@@ -883,8 +888,8 @@ if vista_vendedor_activa:
     with tab_productos_v:
         st.dataframe(
             siscor_db.top_productos(
-                mes_actual_desde.isoformat(),
-                fecha_maxima.isoformat(),
+                desde_sql,
+                hasta_sql,
                 zonas_filtro,
                 limite=8,
             ),
@@ -925,10 +930,10 @@ if vista_vendedor_activa:
     if cliente_seleccionado:
         resumen_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
             cliente_seleccionado,
-            mes_actual_desde.isoformat(),
-            fecha_maxima.isoformat(),
-            mes_anterior_desde.isoformat(),
-            mes_anterior_hasta.isoformat(),
+            desde_sql,
+            hasta_sql,
+            comparacion_desde_sql,
+            comparacion_hasta_sql,
             zonas_filtro,
         )
         resumen_row = resumen_cliente.iloc[0]
@@ -937,8 +942,8 @@ if vista_vendedor_activa:
         ultima_compra = resumen_row["ultima_compra"]
         ultima_compra_texto = "Sin compra" if pd.isna(ultima_compra) else str(ultima_compra)
         ec1, ec2, ec3, ec4 = st.columns(4)
-        ec1.metric("Venta mes", money(venta_mes_cliente))
-        ec2.metric("Mes anterior", money(venta_anterior_cliente))
+        ec1.metric("Venta periodo", money(venta_mes_cliente))
+        ec2.metric("Periodo anterior", money(venta_anterior_cliente))
         ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
         ec4.metric("Ultima compra", ultima_compra_texto)
         st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente, zonas_filtro))
@@ -964,8 +969,8 @@ if vista_vendedor_activa:
                 hide_index=True,
                 column_config={
                     "producto": "Producto",
-                    "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
-                    "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+                    "venta_mes": st.column_config.NumberColumn("Venta periodo", format="$ %.0f"),
+                    "venta_mes_anterior": st.column_config.NumberColumn("Periodo anterior", format="$ %.0f"),
                     "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
                 },
             )
@@ -1095,18 +1100,18 @@ ventas_zona = siscor_db.ventas_por_zona(desde_sql, hasta_sql, zonas_filtro)
 top_clientes = siscor_db.top_clientes(desde_sql, hasta_sql, zonas_filtro)
 top_productos = siscor_db.top_productos(desde_sql, hasta_sql, zonas_filtro)
 clientes_recuperar = siscor_db.clientes_a_recuperar(
-    mes_actual_desde.isoformat(),
-    fecha_maxima.isoformat(),
-    mes_anterior_desde.isoformat(),
-    mes_anterior_hasta.isoformat(),
+    desde_sql,
+    hasta_sql,
+    comparacion_desde_sql,
+    comparacion_hasta_sql,
     zonas_filtro,
 )
 clientes_recuperar = adapt_actions_dataframe(clientes_recuperar)
 productos_impulsar = siscor_db.productos_a_impulsar(
-    mes_actual_desde.isoformat(),
-    fecha_maxima.isoformat(),
-    mes_anterior_desde.isoformat(),
-    mes_anterior_hasta.isoformat(),
+    desde_sql,
+    hasta_sql,
+    comparacion_desde_sql,
+    comparacion_hasta_sql,
     zonas_filtro,
 )
 
@@ -1142,7 +1147,7 @@ else:
             )
 
     resumen_ejecutivo = build_executive_brief(
-        f"{mes_actual_desde.strftime('%d/%m/%Y')} al {fecha_maxima.strftime('%d/%m/%Y')}",
+        f"{fecha_desde.strftime('%d/%m/%Y')} al {fecha_hasta.strftime('%d/%m/%Y')}",
         total_ventas_mes,
         total_objetivo,
         ritmo_total,
@@ -1198,8 +1203,8 @@ with tab_clientes:
         column_config={
             "cliente": "Cliente",
             "zona": "Zona",
-            "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
-            "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+            "venta_mes": st.column_config.NumberColumn("Venta periodo", format="$ %.0f"),
+            "venta_mes_anterior": st.column_config.NumberColumn("Periodo anterior", format="$ %.0f"),
             "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
             "accion": "Accion sugerida",
         },
@@ -1224,10 +1229,10 @@ with tab_productos:
         hide_index=True,
         column_config={
             "producto": "Producto",
-            "cantidad_mes": st.column_config.NumberColumn("Cantidad mes", format="%.2f"),
-            "cantidad_mes_anterior": st.column_config.NumberColumn("Cantidad mes anterior", format="%.2f"),
-            "venta_mes": st.column_config.NumberColumn("Venta mes", format="$ %.0f"),
-            "venta_mes_anterior": st.column_config.NumberColumn("Mes anterior", format="$ %.0f"),
+            "cantidad_mes": st.column_config.NumberColumn("Cantidad periodo", format="%.2f"),
+            "cantidad_mes_anterior": st.column_config.NumberColumn("Cantidad periodo anterior", format="%.2f"),
+            "venta_mes": st.column_config.NumberColumn("Venta periodo", format="$ %.0f"),
+            "venta_mes_anterior": st.column_config.NumberColumn("Periodo anterior", format="$ %.0f"),
             "variacion": st.column_config.NumberColumn("Variacion", format="$ %.0f"),
             "accion": "Accion sugerida",
         },
