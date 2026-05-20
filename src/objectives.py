@@ -29,7 +29,7 @@ def month_progress(fecha: object) -> float:
 def remaining_days(fecha: object) -> int:
     current_date = pd.to_datetime(fecha).date()
     days_in_month = monthrange(current_date.year, current_date.month)[1]
-    return max(days_in_month - current_date.day, 0)
+    return max(days_in_month - current_date.day + 1, 1)
 
 
 def load_objectives(path: Path = OBJECTIVES_PATH) -> pd.DataFrame:
