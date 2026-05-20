@@ -1369,15 +1369,3 @@ with tab_zonas:
             "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
         },
     )
-
-st.subheader("Evolucion mensual")
-st.dataframe(
-    ventas_mes,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "mes": st.column_config.DateColumn("Mes", format="MM/YYYY"),
-        "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
-        "comprobantes": st.column_config.NumberColumn("Comprobantes", format="%d"),
-    },
-)
