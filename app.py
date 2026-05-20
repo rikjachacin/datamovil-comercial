@@ -841,8 +841,14 @@ if vista_vendedor_activa:
 
     st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor, zonas_filtro))
 
-    tab_plan, tab_clientes_v, tab_productos_v = st.tabs(["Plan de accion", "Clientes", "Productos"])
-    with tab_plan:
+    seccion_vendedor = st.segmented_control(
+        "Detalle vendedor",
+        ["Plan de accion", "Clientes", "Productos"],
+        default="Plan de accion",
+        label_visibility="collapsed",
+        key="detalle_vendedor",
+    )
+    if seccion_vendedor == "Plan de accion":
         st.markdown("#### Clientes a recuperar")
         st.dataframe(
             clientes_vendedor,
@@ -873,7 +879,7 @@ if vista_vendedor_activa:
             },
         )
 
-    with tab_clientes_v:
+    elif seccion_vendedor == "Clientes":
         st.dataframe(
             top_clientes_vendedor,
             use_container_width=True,
@@ -885,7 +891,7 @@ if vista_vendedor_activa:
             },
         )
 
-    with tab_productos_v:
+    else:
         st.dataframe(
             siscor_db.top_productos(
                 desde_sql,
