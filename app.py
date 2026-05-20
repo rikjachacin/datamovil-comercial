@@ -253,6 +253,66 @@ st.markdown(
         color: #111827;
     }
 
+    .dm-goal-board {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px;
+    }
+
+    .dm-goal-card {
+        background: var(--dm-panel);
+        border: 1px solid var(--dm-border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.05);
+    }
+
+    .dm-goal-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 10px;
+    }
+
+    .dm-goal-zone {
+        font-weight: 800;
+        color: var(--dm-text);
+    }
+
+    .dm-goal-pct {
+        font-size: 22px;
+        font-weight: 850;
+        white-space: nowrap;
+    }
+
+    .dm-goal-track {
+        height: 13px;
+        border-radius: 999px;
+        overflow: hidden;
+        margin-bottom: 10px;
+    }
+
+    .dm-goal-fill {
+        height: 100%;
+        border-radius: 999px;
+    }
+
+    .dm-goal-meta {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 12px;
+        color: var(--dm-muted);
+        font-size: 13px;
+    }
+
+    .dm-goal-meta strong {
+        display: block;
+        color: var(--dm-text);
+        font-size: 14px;
+        margin-top: 2px;
+    }
+
     div[data-testid="stPlotlyChart"],
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--dm-border);
@@ -404,6 +464,35 @@ def render_ranking_table(df: pd.DataFrame) -> str:
     header_html = "".join(f"<th>{header}</th>" for header in headers)
     body_html = "".join(rows)
     return f'<div class="dm-table-wrap"><table class="dm-ranking-table"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table></div>'
+
+
+def render_goal_board(df: pd.DataFrame) -> str:
+    cards = []
+    for _, row in df.iterrows():
+        pct = min(max(numeric_value(row["cumplimiento_pct"]), 0), 120)
+        fill_pct = min(pct, 100)
+        color, bg = progress_colors(pct)
+        status = html.escape(str(row["estado"]))
+        cards.append(
+            f"""
+            <div class="dm-goal-card">
+                <div class="dm-goal-top">
+                    <div class="dm-goal-zone">{html.escape(str(row['zona']))}</div>
+                    <div class="dm-goal-pct" style="color:{color};">{percent_points(pct)}</div>
+                </div>
+                <div class="dm-goal-track" style="background:{bg};">
+                    <div class="dm-goal-fill" style="width:{fill_pct:.1f}%; background:{color};"></div>
+                </div>
+                <div class="dm-goal-meta">
+                    <div>Vendido<strong>{money(row['ventas_mes'])}</strong></div>
+                    <div>Objetivo<strong>{money(row['objetivo'])}</strong></div>
+                    <div>Diario necesario<strong>{money(row['venta_diaria_necesaria'])}</strong></div>
+                    <div>Estado<strong>{status}</strong></div>
+                </div>
+            </div>
+            """
+        )
+    return f"<div class='dm-goal-board'>{''.join(cards)}</div>"
 
 
 def seller_action_message(
@@ -1111,7 +1200,8 @@ else:
         ]
     ]
     ranking_df.loc[~ranking_df["tiene_objetivo"], "estado"] = "Sin objetivo"
-    st.markdown(render_ranking_table(ranking_df), unsafe_allow_html=True)
+    st.markdown("#### Cumplimiento por zona")
+    st.markdown(render_goal_board(ranking_df), unsafe_allow_html=True)
 
 st.divider()
 
