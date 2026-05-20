@@ -14,6 +14,9 @@ OBJECTIVES_PATH = Path("data/objetivos.csv")
 ENCRYPTED_OBJECTIVES_PATH = Path("data/objetivos.csv.enc")
 SNAPSHOT_KEY_PATH = Path("data/snapshot.key")
 REQUIRED_COLUMNS = ("mes", "zona", "objetivo")
+BUSINESS_DAYS_BY_MONTH = {
+    "2026-05": 22,
+}
 
 
 def month_key(value: object) -> str:
@@ -22,14 +25,33 @@ def month_key(value: object) -> str:
 
 def month_progress(fecha: object) -> float:
     current_date = pd.to_datetime(fecha).date()
-    days_in_month = monthrange(current_date.year, current_date.month)[1]
-    return min(current_date.day / days_in_month, 1.0)
+    total_business_days = _business_days_in_month(current_date)
+    elapsed_business_days = _business_days_between(current_date.replace(day=1), current_date)
+    return min(elapsed_business_days / total_business_days, 1.0) if total_business_days else 1.0
 
 
 def remaining_days(fecha: object) -> int:
     current_date = pd.to_datetime(fecha).date()
     days_in_month = monthrange(current_date.year, current_date.month)[1]
-    return max(days_in_month - current_date.day + 1, 1)
+    month_end = current_date.replace(day=days_in_month)
+    return max(_business_days_between(current_date, month_end), 1)
+
+
+def _business_days_in_month(fecha: object) -> int:
+    current_date = pd.to_datetime(fecha).date()
+    configured_days = BUSINESS_DAYS_BY_MONTH.get(month_key(current_date))
+    if configured_days:
+        return configured_days
+    days_in_month = monthrange(current_date.year, current_date.month)[1]
+    return _business_days_between(current_date.replace(day=1), current_date.replace(day=days_in_month))
+
+
+def _business_days_between(start: object, end: object) -> int:
+    start_date = pd.to_datetime(start).date()
+    end_date = pd.to_datetime(end).date()
+    if start_date > end_date:
+        return 0
+    return len(pd.bdate_range(start=start_date, end=end_date))
 
 
 def load_objectives(path: Path = OBJECTIVES_PATH) -> pd.DataFrame:
