@@ -125,7 +125,10 @@ st.markdown(
 
     [data-testid="stMetricValue"] {
         color: var(--dm-text);
-        font-size: 26px;
+        font-size: 23px;
+        line-height: 1.18;
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 
     .stButton button {
@@ -837,17 +840,19 @@ if vista_vendedor_activa:
     if vendedor_row is None:
         st.warning("Tu zona no tiene objetivo cargado para este mes.")
     else:
-        v1, v2, v3, v4, v5 = st.columns(5)
+        v1, v2, v3 = st.columns(3)
         v1.metric("Ventas mes", money(vendedor_row["ventas_mes"]))
         v2.metric("Objetivo", money(vendedor_row["objetivo"]))
         v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
-        v4.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
-        v5.metric("Dias para vender", workdays(dias_restantes))
 
-        r1, r2, r3 = st.columns(3)
-        r1.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
-        r2.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
-        r3.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
+        r2.metric("Dias para vender", workdays(dias_restantes))
+        r3.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
+        r4.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
+
+        b1, _ = st.columns([1, 3])
+        b1.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
 
     st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor, zonas_filtro))
 
