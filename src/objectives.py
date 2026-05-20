@@ -14,8 +14,8 @@ OBJECTIVES_PATH = Path("data/objetivos.csv")
 ENCRYPTED_OBJECTIVES_PATH = Path("data/objetivos.csv.enc")
 SNAPSHOT_KEY_PATH = Path("data/snapshot.key")
 REQUIRED_COLUMNS = ("mes", "zona", "objetivo")
-BUSINESS_DAYS_BY_MONTH = {
-    "2026-05": 22,
+HOLIDAYS = {
+    "2026-05-25",
 }
 
 
@@ -39,19 +39,26 @@ def remaining_days(fecha: object) -> int:
 
 def _business_days_in_month(fecha: object) -> int:
     current_date = pd.to_datetime(fecha).date()
-    configured_days = BUSINESS_DAYS_BY_MONTH.get(month_key(current_date))
-    if configured_days:
-        return configured_days
     days_in_month = monthrange(current_date.year, current_date.month)[1]
     return _business_days_between(current_date.replace(day=1), current_date.replace(day=days_in_month))
 
 
-def _business_days_between(start: object, end: object) -> int:
+def _business_days_between(start: object, end: object) -> float:
     start_date = pd.to_datetime(start).date()
     end_date = pd.to_datetime(end).date()
     if start_date > end_date:
-        return 0
-    return len(pd.bdate_range(start=start_date, end=end_date))
+        return 0.0
+    days = pd.date_range(start=start_date, end=end_date, freq="D")
+    total = 0.0
+    for day in days:
+        date_value = day.date()
+        if date_value.isoformat() in HOLIDAYS:
+            continue
+        if date_value.weekday() < 5:
+            total += 1.0
+        elif date_value.weekday() == 5:
+            total += 0.5
+    return total
 
 
 def load_objectives(path: Path = OBJECTIVES_PATH) -> pd.DataFrame:

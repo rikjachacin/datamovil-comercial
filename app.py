@@ -291,6 +291,15 @@ def number(value: object) -> str:
     return f"{float(value):,.0f}".replace(",", ".")
 
 
+def workdays(value: object) -> str:
+    if pd.isna(value):
+        return "0"
+    numeric = float(value)
+    if numeric.is_integer():
+        return number(numeric)
+    return f"{numeric:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def percent(value: object) -> str:
     if pd.isna(value):
         return "0,0 %"
@@ -833,7 +842,7 @@ if vista_vendedor_activa:
         v2.metric("Objetivo", money(vendedor_row["objetivo"]))
         v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
         v4.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
-        v5.metric("Dias para vender", number(dias_restantes))
+        v5.metric("Dias para vender", workdays(dias_restantes))
 
         r1, r2, r3 = st.columns(3)
         r1.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
@@ -1050,7 +1059,7 @@ else:
     p1.metric("Proyeccion de cierre", money(total_proyeccion))
     p2.metric("Brecha proyectada", money(total_proyeccion - total_objetivo))
     p3.metric("Venta diaria necesaria", money(venta_diaria_necesaria))
-    p4.metric("Dias para vender", number(dias_restantes))
+    p4.metric("Dias para vender", workdays(dias_restantes))
 
     insights = objectives.executive_insights(desempeno_df)
     leader = insights["leader"]
