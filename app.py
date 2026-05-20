@@ -472,27 +472,26 @@ def render_goal_board(df: pd.DataFrame) -> str:
         pct = min(max(numeric_value(row["cumplimiento_pct"]), 0), 120)
         fill_pct = min(pct, 100)
         color, bg = progress_colors(pct)
+        zone = html.escape(str(row["zona"]))
         status = html.escape(str(row["estado"]))
         cards.append(
-            f"""
-            <div class="dm-goal-card">
-                <div class="dm-goal-top">
-                    <div class="dm-goal-zone">{html.escape(str(row['zona']))}</div>
-                    <div class="dm-goal-pct" style="color:{color};">{percent_points(pct)}</div>
-                </div>
-                <div class="dm-goal-track" style="background:{bg};">
-                    <div class="dm-goal-fill" style="width:{fill_pct:.1f}%; background:{color};"></div>
-                </div>
-                <div class="dm-goal-meta">
-                    <div>Vendido<strong>{money(row['ventas_mes'])}</strong></div>
-                    <div>Objetivo<strong>{money(row['objetivo'])}</strong></div>
-                    <div>Diario necesario<strong>{money(row['venta_diaria_necesaria'])}</strong></div>
-                    <div>Estado<strong>{status}</strong></div>
-                </div>
-            </div>
-            """
+            "<div class='dm-goal-card'>"
+            "<div class='dm-goal-top'>"
+            f"<div class='dm-goal-zone'>{zone}</div>"
+            f"<div class='dm-goal-pct' style='color:{color};'>{percent_points(pct)}</div>"
+            "</div>"
+            f"<div class='dm-goal-track' style='background:{bg};'>"
+            f"<div class='dm-goal-fill' style='width:{fill_pct:.1f}%; background:{color};'></div>"
+            "</div>"
+            "<div class='dm-goal-meta'>"
+            f"<div>Vendido<strong>{money(row['ventas_mes'])}</strong></div>"
+            f"<div>Objetivo<strong>{money(row['objetivo'])}</strong></div>"
+            f"<div>Diario necesario<strong>{money(row['venta_diaria_necesaria'])}</strong></div>"
+            f"<div>Estado<strong>{status}</strong></div>"
+            "</div>"
+            "</div>"
         )
-    return f"<div class='dm-goal-board'>{''.join(cards)}</div>"
+    return "<div class='dm-goal-board'>" + "".join(cards) + "</div>"
 
 
 def seller_action_message(
