@@ -1148,13 +1148,74 @@ m4.metric("Ticket promedio", money(kpi_df["ticket_promedio"]))
 
 st.divider()
 
+mes_referencia = objectives.month_key(fecha_hasta)
+mes_referencia_desde = pd.Timestamp(fecha_hasta).replace(day=1).date()
+zonas_objetivo_periodo = tuple(
+    objetivos_df.loc[objetivos_df["mes"] == mes_referencia, "zona"].dropna().astype(str)
+)
+zonas_objetivo_filtradas = tuple(
+    zona for zona in zonas_objetivo_periodo if not zonas_filtro or zona in zonas_filtro
+)
+if not zonas_objetivo_filtradas:
+    zonas_objetivo_filtradas = zonas_filtro or zonas_objetivo_periodo
+
+if periodo == "Mes en curso":
+    objetivo_desde = mes_referencia_desde
+    objetivo_hasta = fecha_hasta
+    objetivos_calculo = objetivos_df[
+        (objetivos_df["mes"] == mes_referencia)
+        & (objetivos_df["zona"].isin(zonas_objetivo_filtradas))
+    ].copy()
+    avance_objetivo = objectives.month_progress(fecha_hasta)
+    dias_objetivo = objectives.remaining_days(fecha_hasta)
+    dias_display_objetivo = dias_objetivo
+    objetivo_titulo = "Objetivos y ritmo del mes"
+    label_cumplimiento = "Cumplimiento mensual"
+    label_ritmo_esperado = "Ritmo esperado"
+    label_proyeccion = "Proyeccion de cierre"
+    label_brecha = "Brecha proyectada"
+    label_diario = "Venta diaria necesaria"
+    label_dias = "Dias para vender"
+else:
+    objetivo_desde = fecha_desde
+    objetivo_hasta = fecha_hasta
+    periodo_objetivo_desde = max(fecha_desde, mes_referencia_desde)
+    periodo_objetivo_hasta = fecha_hasta
+    dias_periodo_objetivo = objectives.business_days_between(
+        periodo_objetivo_desde,
+        periodo_objetivo_hasta,
+    )
+    dias_mes_referencia = objectives.business_days_in_month(fecha_hasta)
+    proporcion_objetivo = dias_periodo_objetivo / dias_mes_referencia if dias_mes_referencia else 0
+    objetivos_calculo = objetivos_df[
+        (objetivos_df["mes"] == mes_referencia)
+        & (objetivos_df["zona"].isin(zonas_objetivo_filtradas))
+    ].copy()
+    objetivos_calculo.loc[
+        objetivos_calculo["mes"] == mes_referencia,
+        "objetivo",
+    ] = objetivos_calculo.loc[
+        objetivos_calculo["mes"] == mes_referencia,
+        "objetivo",
+    ] * proporcion_objetivo
+    avance_objetivo = 1.0
+    dias_objetivo = 1.0
+    dias_display_objetivo = dias_periodo_objetivo
+    objetivo_titulo = "Objetivos del periodo"
+    label_cumplimiento = "Cumplimiento periodo"
+    label_ritmo_esperado = "Peso del periodo"
+    label_proyeccion = "Ventas del periodo"
+    label_brecha = "Brecha periodo"
+    label_diario = "Falta periodo"
+    label_dias = "Dias periodo"
+
 ventas_objetivo = siscor_db.ventas_por_zona(
-    mes_actual_desde.isoformat(),
-    fecha_maxima.isoformat(),
-    zonas_objetivo,
+    objetivo_desde.isoformat(),
+    objetivo_hasta.isoformat(),
+    zonas_objetivo_filtradas,
 )
 
-st.subheader("Objetivos y ritmo del mes")
+st.subheader(objetivo_titulo)
 desempeno_df = pd.DataFrame()
 total_ventas_mes = 0.0
 total_objetivo = 0.0
@@ -1181,10 +1242,10 @@ if objetivos_df.empty:
 else:
     desempeno_df = objectives.monthly_performance(
         ventas_objetivo,
-        objetivos_df,
-        mes_objetivo,
-        avance_mes,
-        dias_restantes,
+        objetivos_calculo,
+        mes_referencia,
+        avance_objetivo,
+        dias_objetivo,
     )
     desempeno_con_objetivo = desempeno_df[desempeno_df["tiene_objetivo"]].copy()
     total_ventas_mes = desempeno_con_objetivo["ventas_mes"].sum()
@@ -1197,16 +1258,16 @@ else:
     zonas_en_ritmo = int((desempeno_con_objetivo["ritmo"] >= 1).sum())
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Cumplimiento mensual", percent(cumplimiento_total))
-    c2.metric("Ritmo esperado", percent(avance_mes))
+    c1.metric(label_cumplimiento, percent(cumplimiento_total))
+    c2.metric(label_ritmo_esperado, percent(avance_objetivo if periodo == "Mes en curso" else proporcion_objetivo))
     c3.metric("Ritmo del equipo", percent(ritmo_total))
     c4.metric("Zonas en ritmo", f"{zonas_en_ritmo}/{len(desempeno_con_objetivo)}")
 
     p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Proyeccion de cierre", money(total_proyeccion))
-    p2.metric("Brecha proyectada", money(total_proyeccion - total_objetivo))
-    p3.metric("Venta diaria necesaria", money(venta_diaria_necesaria))
-    p4.metric("Dias para vender", workdays(dias_restantes))
+    p1.metric(label_proyeccion, money(total_proyeccion))
+    p2.metric(label_brecha, money(total_proyeccion - total_objetivo))
+    p3.metric(label_diario, money(venta_diaria_necesaria))
+    p4.metric(label_dias, workdays(dias_display_objetivo))
 
     insights = objectives.executive_insights(desempeno_df)
     leader = insights["leader"]

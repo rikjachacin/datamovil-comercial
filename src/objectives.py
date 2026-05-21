@@ -118,7 +118,10 @@ def monthly_performance(
     base = base.rename(columns={"total": "ventas_mes"})
 
     current_objectives = objetivos[objetivos["mes"] == mes].copy()
-    out = base.merge(current_objectives[["zona", "objetivo"]], on="zona", how="left")
+    out = current_objectives[["zona", "objetivo"]].merge(base, on="zona", how="left")
+    out[["ventas_mes", "comprobantes", "clientes"]] = out[
+        ["ventas_mes", "comprobantes", "clientes"]
+    ].fillna(0)
     out["objetivo"] = out["objetivo"].fillna(0)
     out["tiene_objetivo"] = out["objetivo"] > 0
     out["cumplimiento"] = out.apply(
