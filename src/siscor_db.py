@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+import math
 import os
 import re
 import warnings
@@ -29,6 +30,8 @@ SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
 COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
+BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
+NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 
 
 class SnapshotDataMissing(RuntimeError):
@@ -261,6 +264,15 @@ def _commercial_document_filter(alias: str) -> str:
     return f" AND {alias}.tipo IN ({included})"
 
 
+def _credit_document_filter(alias: str) -> str:
+    return f" AND {alias}.tipo IN ('FC', 'ND')"
+
+
+def _balance_document_filter(alias: str) -> str:
+    included = ", ".join(f"'{doc_type}'" for doc_type in BALANCE_DOCUMENT_TYPES)
+    return f" AND {alias}.tipo IN ({included})"
+
+
 def _authorized_invoice_filter(alias: str) -> str:
     return f" AND ISNULL({alias}.autorizado, 0) = 1"
 
@@ -271,6 +283,35 @@ def _signed_total(alias: str, column: str = "total") -> str:
         f"THEN -CAST({alias}.{column} AS decimal(18, 2)) "
         f"ELSE CAST({alias}.{column} AS decimal(18, 2)) END"
     )
+
+
+def _signed_balance(alias: str, column: str = "saldo") -> str:
+    negative_types = ", ".join(f"'{doc_type}'" for doc_type in NEGATIVE_BALANCE_DOCUMENT_TYPES)
+    return (
+        f"CASE WHEN {alias}.tipo IN ({negative_types}) "
+        f"THEN -CAST({alias}.{column} AS decimal(18, 2)) "
+        f"ELSE CAST({alias}.{column} AS decimal(18, 2)) END"
+    )
+
+
+def _round_to_thousand(value: float) -> float:
+    if value <= 0 or math.isnan(value):
+        return 0.0
+    return round(value / 1000) * 1000.0
+
+
+def _credit_rule(segment: object) -> tuple[str, int, float, str]:
+    rules = {
+        "Bueno": ("A", 30, 2.0, "Puede venderse con credito normal amplio"),
+        "Normal": ("B", 21, 1.5, "Credito normal controlado"),
+        "Lento habitual": ("B", 7, 1.0, "Vender con seguimiento de cobranza"),
+        "Riesgoso": ("C", 0, 0.0, "Vender contado o con aprobacion puntual"),
+        "Malo": ("C", 0, 0.0, "Vender contado"),
+        "Sin historial - limpio": ("B", 7, 0.5, "Limite bajo hasta formar historial"),
+        "Sin historial - observar": ("B", 7, 0.3, "Limite muy bajo y seguimiento"),
+        "Sin historial - riesgo inicial": ("C", 0, 0.0, "Contado hasta regularizar"),
+    }
+    return rules.get(str(segment or "").strip(), ("B", 7, 0.3, "Revisar manualmente"))
 
 
 def zonas() -> pd.DataFrame:
@@ -795,6 +836,207 @@ def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
         ORDER BY cliente;
         """,
         zona_params,
+    )
+
+
+def cliente_credito(
+    cliente: str,
+    zonas_filtro: tuple[str, ...] = (),
+    meses_venta: int = 12,
+    meses_pago: int = 24,
+) -> pd.DataFrame:
+    columns = [
+        "dias_deuda",
+        "importe_deuda",
+        "saldo_vencido",
+        "dias_credito_sugerido",
+        "limite_compra_sugerido",
+        "categoria_abc",
+        "segmento_pago",
+        "recomendacion_credito",
+    ]
+    if data_mode() == "snapshot":
+        return pd.DataFrame(
+            [
+                {
+                    "dias_deuda": 0,
+                    "importe_deuda": 0,
+                    "saldo_vencido": 0,
+                    "dias_credito_sugerido": 0,
+                    "limite_compra_sugerido": 0,
+                    "categoria_abc": "Sin datos",
+                    "segmento_pago": "Sin datos de cobranza",
+                    "recomendacion_credito": "Disponible solo con conexion a SisCor.",
+                }
+            ],
+            columns=columns,
+        )
+
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
+    cliente_ids_df = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT DISTINCT
+            c.id_cliente
+        FROM dbo.cli_cliente c
+        INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+        LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+        WHERE ISNULL(c.activo, 0) = 1
+          AND ISNULL(cs.activo, 0) = 1
+          AND COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) = ?
+          {zona_sql};
+        """,
+        (cliente, *zona_params),
+    )
+    if cliente_ids_df.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "dias_deuda": 0,
+                    "importe_deuda": 0,
+                    "saldo_vencido": 0,
+                    "dias_credito_sugerido": 0,
+                    "limite_compra_sugerido": 0,
+                    "categoria_abc": "Sin datos",
+                    "segmento_pago": "Cliente no encontrado",
+                    "recomendacion_credito": "Revisar asignacion del cliente.",
+                }
+            ],
+            columns=columns,
+        )
+
+    cliente_ids = tuple(int(value) for value in cliente_ids_df["id_cliente"].dropna().unique())
+    cliente_placeholders = ", ".join("?" for _ in cliente_ids)
+    signed_balance = _signed_balance("f", "saldo")
+
+    profile = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH ventas AS (
+            SELECT
+                ISNULL(SUM({_signed_total("f", "total")}), 0) AS monto_facturado
+            FROM dbo.cli_factura f
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.id_cliente IN ({cliente_placeholders})
+              AND f.fecha >= DATEADD(month, -?, GETDATE())
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+        ),
+        pagos AS (
+            SELECT
+                COUNT(*) AS facturas_cobradas,
+                AVG(CAST(DATEDIFF(day, f.fecha, f.fecha_liquidacion) AS decimal(18, 2))) AS dias_promedio_pago,
+                MAX(DATEDIFF(day, f.fecha, f.fecha_liquidacion)) AS peor_pago,
+                SUM(CASE WHEN DATEDIFF(day, f.fecha, f.fecha_liquidacion) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) AS pagos_31_60,
+                SUM(CASE WHEN DATEDIFF(day, f.fecha, f.fecha_liquidacion) > 60 THEN 1 ELSE 0 END) AS pagos_mas_60
+            FROM dbo.cli_factura f
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND ISNULL(f.cobrado, 0) = 1
+              AND f.fecha_liquidacion IS NOT NULL
+              AND DATEDIFF(day, f.fecha, f.fecha_liquidacion) >= 0
+              AND f.id_cliente IN ({cliente_placeholders})
+              AND f.fecha >= DATEADD(month, -?, GETDATE())
+              {_commercial_zone_filter("f")}
+              {_credit_document_filter("f")}
+        ),
+        deuda AS (
+            SELECT
+                ISNULL(SUM(CASE WHEN f.saldo <> 0 THEN {signed_balance} ELSE 0 END), 0) AS saldo_actual,
+                ISNULL(SUM(CASE WHEN f.saldo <> 0
+                    AND CAST(COALESCE(f.fecha_vencimiento, f.fecha) AS date) < CAST(GETDATE() AS date)
+                    THEN {signed_balance} ELSE 0 END), 0) AS saldo_vencido,
+                ISNULL(MAX(CASE WHEN f.saldo <> 0
+                    THEN DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE())
+                    ELSE 0 END), 0) AS atraso_actual
+            FROM dbo.cli_factura f
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.id_cliente IN ({cliente_placeholders})
+              AND f.saldo <> 0
+              {_commercial_zone_filter("f")}
+              {_balance_document_filter("f")}
+        )
+        SELECT
+            v.monto_facturado,
+            COALESCE(p.facturas_cobradas, 0) AS facturas_cobradas,
+            COALESCE(p.dias_promedio_pago, 0) AS dias_promedio_pago,
+            COALESCE(p.peor_pago, 0) AS peor_pago,
+            COALESCE(p.pagos_31_60, 0) AS pagos_31_60,
+            COALESCE(p.pagos_mas_60, 0) AS pagos_mas_60,
+            d.saldo_actual,
+            d.saldo_vencido,
+            d.atraso_actual,
+            CASE
+                WHEN COALESCE(p.facturas_cobradas, 0) < 3 AND d.saldo_actual <= 0 THEN 'Sin historial - limpio'
+                WHEN COALESCE(p.facturas_cobradas, 0) < 3 AND d.saldo_vencido > 0 THEN 'Sin historial - riesgo inicial'
+                WHEN COALESCE(p.facturas_cobradas, 0) < 3 AND d.saldo_actual > 0 THEN 'Sin historial - observar'
+                WHEN p.dias_promedio_pago <= 7 AND 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) <= 10 THEN 'Bueno'
+                WHEN p.dias_promedio_pago <= 20
+                    AND 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) <= 20
+                    AND 100.0 * p.pagos_mas_60 / NULLIF(p.facturas_cobradas, 0) <= 10 THEN 'Normal'
+                WHEN 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) >= 70
+                    AND d.saldo_vencido > 0 THEN 'Riesgoso'
+                WHEN p.dias_promedio_pago <= 45 OR 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) <= 45 THEN 'Lento habitual'
+                WHEN p.dias_promedio_pago <= 70 OR 100.0 * p.pagos_mas_60 / NULLIF(p.facturas_cobradas, 0) <= 35 THEN 'Riesgoso'
+                ELSE 'Malo'
+            END AS segmento_pago
+        FROM ventas v
+        CROSS JOIN pagos p
+        CROSS JOIN deuda d;
+        """,
+        (
+            *cliente_ids,
+            meses_venta,
+            *cliente_ids,
+            meses_pago,
+            *cliente_ids,
+        ),
+    )
+    if profile.empty:
+        return pd.DataFrame(columns=columns)
+
+    row = profile.iloc[0]
+    segmento = str(row.get("segmento_pago", ""))
+    categoria, dias_credito, factor_tope, recomendacion = _credit_rule(segmento)
+    saldo_actual = max(float(row.get("saldo_actual", 0) or 0), 0)
+    saldo_vencido = max(float(row.get("saldo_vencido", 0) or 0), 0)
+    atraso_actual = max(float(row.get("atraso_actual", 0) or 0), 0)
+    monto_facturado = max(float(row.get("monto_facturado", 0) or 0), 0)
+
+    if saldo_vencido > 0 and atraso_actual >= 45:
+        categoria = "C"
+        dias_credito = 0
+        factor_tope = 0.0
+        recomendacion = "Contado hasta regularizar deuda vencida"
+    elif saldo_vencido > 0 and atraso_actual >= 15:
+        if categoria == "A":
+            categoria = "B"
+        dias_credito = min(dias_credito, 7)
+        factor_tope = min(factor_tope, 1.0)
+        recomendacion = "Vender con compromiso de pago"
+
+    promedio_mensual = monto_facturado / meses_venta if meses_venta else 0
+    limite_compra = _round_to_thousand(promedio_mensual * factor_tope)
+    if categoria == "C":
+        limite_compra = 0
+        dias_credito = 0
+
+    return pd.DataFrame(
+        [
+            {
+                "dias_deuda": atraso_actual,
+                "importe_deuda": saldo_actual,
+                "saldo_vencido": saldo_vencido,
+                "dias_credito_sugerido": dias_credito,
+                "limite_compra_sugerido": limite_compra,
+                "categoria_abc": categoria,
+                "segmento_pago": segmento,
+                "recomendacion_credito": recomendacion,
+            }
+        ],
+        columns=columns,
     )
 
 

@@ -1097,6 +1097,20 @@ if vista_vendedor_activa:
         ec4.metric("Ultima compra", ultima_compra_texto)
         st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente, zonas_filtro))
 
+        credito_cliente = siscor_db.cliente_credito(cliente_seleccionado, zonas_filtro)
+        if not credito_cliente.empty:
+            credito_row = credito_cliente.iloc[0]
+            st.markdown("#### Perfil de credito sugerido")
+            dc1, dc2, dc3, dc4 = st.columns(4)
+            dc1.metric("Dias deuda a la fecha", number(credito_row["dias_deuda"]))
+            dc2.metric("Importe de deuda", money(credito_row["importe_deuda"]))
+            dc3.metric("Dias credito sugerido", number(credito_row["dias_credito_sugerido"]))
+            dc4.metric("Limite compra sugerido", money(credito_row["limite_compra_sugerido"]))
+            st.caption(
+                f"Segmento {credito_row['categoria_abc']} - "
+                f"{credito_row['segmento_pago']}. {credito_row['recomendacion_credito']}"
+            )
+
         cprod, ccaidos = st.columns(2)
         with cprod:
             st.markdown("#### Productos habituales")
