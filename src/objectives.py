@@ -30,14 +30,22 @@ def month_progress(fecha: object) -> float:
     return min(elapsed_business_days / total_business_days, 1.0) if total_business_days else 1.0
 
 
-def remaining_days(fecha: object) -> int:
+def remaining_days(fecha: object) -> float:
     current_date = pd.to_datetime(fecha).date()
     days_in_month = monthrange(current_date.year, current_date.month)[1]
     month_end = current_date.replace(day=days_in_month)
     return max(_business_days_between(current_date, month_end), 1)
 
 
-def _business_days_in_month(fecha: object) -> int:
+def business_days_in_month(fecha: object) -> float:
+    return _business_days_in_month(fecha)
+
+
+def business_days_between(start: object, end: object) -> float:
+    return _business_days_between(start, end)
+
+
+def _business_days_in_month(fecha: object) -> float:
     current_date = pd.to_datetime(fecha).date()
     days_in_month = monthrange(current_date.year, current_date.month)[1]
     return _business_days_between(current_date.replace(day=1), current_date.replace(day=days_in_month))
@@ -104,7 +112,7 @@ def monthly_performance(
     objetivos: pd.DataFrame,
     mes: str,
     avance_mes: float,
-    dias_restantes: int,
+    dias_restantes: float,
 ) -> pd.DataFrame:
     base = ventas_zona.loc[:, ["zona", "total", "comprobantes", "clientes"]].copy()
     base = base.rename(columns={"total": "ventas_mes"})

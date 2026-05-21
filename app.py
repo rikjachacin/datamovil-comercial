@@ -886,6 +886,11 @@ if vista_vendedor_activa:
         fecha_maxima.isoformat(),
         zonas_filtro,
     )
+    ventas_periodo_vendedor = siscor_db.ventas_por_zona(
+        desde_sql,
+        hasta_sql,
+        zonas_filtro,
+    )
     if objetivos_df.empty:
         desempeno_vendedor = pd.DataFrame()
     else:
@@ -923,23 +928,59 @@ if vista_vendedor_activa:
     )
     clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
 
-    st.subheader("Mi avance del mes")
+    st.subheader("Mi avance del mes" if periodo == "Mes en curso" else "Mi avance del periodo")
     if vendedor_row is None:
         st.warning("Tu zona no tiene objetivo cargado para este mes.")
     else:
-        v1, v2, v3 = st.columns(3)
-        v1.metric("Ventas mes", money(vendedor_row["ventas_mes"]))
-        v2.metric("Objetivo", money(vendedor_row["objetivo"]))
-        v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
+        if periodo == "Mes en curso":
+            v1, v2, v3 = st.columns(3)
+            v1.metric("Ventas mes", money(vendedor_row["ventas_mes"]))
+            v2.metric("Objetivo", money(vendedor_row["objetivo"]))
+            v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
 
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
-        r2.metric("Dias para vender", workdays(dias_restantes))
-        r3.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
-        r4.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
+            r2.metric("Dias para vender", workdays(dias_restantes))
+            r3.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
+            r4.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
 
-        b1, _ = st.columns([1, 3])
-        b1.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
+            b1, _ = st.columns([1, 3])
+            b1.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
+        else:
+            ventas_periodo_total = (
+                ventas_periodo_vendedor["total"].sum() if not ventas_periodo_vendedor.empty else 0
+            )
+            periodo_objetivo_desde = max(fecha_desde, mes_actual_desde)
+            periodo_objetivo_hasta = min(fecha_hasta, fecha_maxima)
+            dias_periodo_objetivo = objectives.business_days_between(
+                periodo_objetivo_desde,
+                periodo_objetivo_hasta,
+            )
+            dias_mes_objetivo = objectives.business_days_in_month(fecha_maxima)
+            objetivo_periodo = (
+                numeric_value(vendedor_row["objetivo"]) * dias_periodo_objetivo / dias_mes_objetivo
+                if dias_mes_objetivo
+                else 0
+            )
+            cumplimiento_periodo = (
+                ventas_periodo_total / objetivo_periodo if objetivo_periodo else 0
+            )
+            brecha_periodo = ventas_periodo_total - objetivo_periodo
+
+            v1, v2, v3, v4 = st.columns(4)
+            v1.metric("Ventas periodo", money(ventas_periodo_total))
+            v2.metric("Objetivo periodo", money(objetivo_periodo))
+            v3.metric("Cumplimiento periodo", percent(cumplimiento_periodo))
+            v4.metric("Dias periodo", workdays(dias_periodo_objetivo))
+
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Objetivo mensual", money(vendedor_row["objetivo"]))
+            r2.metric("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"]))
+            r3.metric("Ritmo mes", percent(vendedor_row["ritmo"]))
+            r4.metric("Brecha periodo", money(brecha_periodo))
+            st.caption(
+                "El objetivo del periodo se calcula proporcionalmente sobre los dias comerciales del mes."
+            )
 
     st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor, zonas_filtro))
 
