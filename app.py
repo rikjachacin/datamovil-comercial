@@ -319,6 +319,7 @@ st.markdown(
         .dm-module-subtitle {
             font-size: 12px;
         }
+
     }
 
     .stButton button {
@@ -376,6 +377,51 @@ st.markdown(
         font-size: 13px;
         line-height: 1.35;
         margin-top: 6px;
+    }
+
+    .dm-decision-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin: 12px 0 18px;
+    }
+
+    .dm-decision-card {
+        background: var(--dm-panel);
+        border: 1px solid var(--dm-border);
+        border-left: 5px solid var(--decision-accent, var(--dm-accent));
+        border-radius: 8px;
+        padding: 15px 16px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
+        min-height: 150px;
+    }
+
+    .dm-decision-label {
+        color: var(--dm-muted);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+    }
+
+    .dm-decision-title {
+        color: var(--dm-text);
+        font-size: 18px;
+        font-weight: 850;
+        line-height: 1.2;
+        margin-bottom: 8px;
+    }
+
+    .dm-decision-note {
+        color: var(--dm-muted);
+        font-size: 13px;
+        line-height: 1.35;
+    }
+
+    @media (max-width: 900px) {
+        .dm-decision-grid {
+            grid-template-columns: 1fr;
+        }
     }
 
     .dm-table-wrap {
@@ -916,6 +962,79 @@ def build_executive_brief(
         lines.append("No hay prioridades criticas detectadas para hoy.")
 
     return "\n".join(lines)
+
+
+def render_decision_room(
+    total_sales: float,
+    total_goal: float,
+    team_pace: float,
+    projected_gap: float,
+    daily_needed: float,
+    insights: dict[str, object],
+    plan: pd.DataFrame,
+) -> str:
+    if not total_goal:
+        cards = [
+            ("Diagnostico", "Sin objetivo cargado", "No se puede evaluar ritmo ni brecha sin meta mensual.", "#64748b"),
+            ("Decision", "Cargar objetivos", "Primero hay que validar objetivos por zona para leer el mes.", "#64748b"),
+            ("Foco de hoy", "Sin foco automatico", "La app necesita objetivo y ventas para priorizar.", "#64748b"),
+            ("Riesgo", "Sin lectura", "No hay base suficiente para medir riesgo comercial.", "#64748b"),
+        ]
+    else:
+        if team_pace >= 1:
+            status = "Equipo en ritmo"
+            status_note = f"Ventas {money(total_sales)} contra objetivo {money(total_goal)}."
+            decision = "Sostener y proteger"
+            decision_note = "Mantener frecuencia comercial y cuidar reposicion de clientes activos."
+            accent = "#16a34a"
+        elif team_pace >= 0.85:
+            status = "Riesgo moderado"
+            status_note = f"Brecha proyectada {money(projected_gap)} si no se corrige el ritmo."
+            decision = "Concentrar apoyo"
+            decision_note = "Enfocar seguimiento diario en las zonas cerca del ritmo para cerrar la brecha."
+            accent = "#f59e0b"
+        else:
+            status = "Fuera de ritmo"
+            status_note = f"Venta diaria necesaria: {money(daily_needed)} para llegar al objetivo."
+            decision = "Intervenir hoy"
+            decision_note = "Priorizar zonas atrasadas, clientes caidos y productos con caida de rotacion."
+            accent = "#ef4444"
+
+        if not plan.empty:
+            first = plan.iloc[0]
+            focus = str(first["titulo"])
+            focus_note = f"{first['detalle']} - {first['accion']}."
+        else:
+            focus = "Sin alerta critica"
+            focus_note = "No hay acciones prioritarias detectadas para este periodo."
+
+        risk = insights.get("risk")
+        if risk is not None:
+            risk_title = str(risk["zona"])
+            risk_note = f"Mayor brecha contra ritmo esperado: {money(risk['brecha_esperada'])}."
+        else:
+            risk_title = "Sin riesgo marcado"
+            risk_note = "No hay zonas con objetivo suficiente para calcular riesgo."
+
+        cards = [
+            ("Diagnostico", status, status_note, accent),
+            ("Decision", decision, decision_note, accent),
+            ("Foco de hoy", focus, focus_note, "#2563eb"),
+            ("Riesgo principal", risk_title, risk_note, "#7c3aed"),
+        ]
+
+    card_html = []
+    for label, title, note, color in cards:
+        card_html.append(
+            f"""
+            <div class="dm-decision-card" style="--decision-accent:{html.escape(color)};">
+                <div class="dm-decision-label">{html.escape(label)}</div>
+                <div class="dm-decision-title">{html.escape(title)}</div>
+                <div class="dm-decision-note">{html.escape(note)}</div>
+            </div>
+            """
+        )
+    return '<div class="dm-decision-grid">' + "".join(card_html) + "</div>"
 
 
 def logo_data_uri() -> str:
@@ -1545,6 +1664,13 @@ total_proyeccion = 0.0
 venta_diaria_necesaria = 0.0
 cumplimiento_total = 0.0
 ritmo_total = 0.0
+insights = {
+    "leader": None,
+    "risk": None,
+    "recovery_daily": 0.0,
+    "below_pace": 0,
+    "message": "No hay objetivos cargados para el mes.",
+}
 if objetivos_df.empty:
     st.info(
         "Falta cargar la tabla de objetivos mensual. La app espera un archivo "
@@ -1649,6 +1775,21 @@ productos_impulsar = siscor_db.productos_a_impulsar(
 )
 
 radar_acciones = build_action_radar(desempeno_df, clientes_recuperar, productos_impulsar)
+plan_diario = build_daily_plan(radar_acciones)
+st.subheader("Sala de decisiones")
+st.markdown(
+    render_decision_room(
+        total_ventas_mes,
+        total_objetivo,
+        ritmo_total,
+        total_proyeccion - total_objetivo,
+        venta_diaria_necesaria,
+        insights,
+        plan_diario,
+    ),
+    unsafe_allow_html=True,
+)
+
 st.subheader("Radar de acciones")
 if radar_acciones.empty:
     st.info("No hay alertas comerciales relevantes para este periodo.")
@@ -1661,7 +1802,6 @@ else:
     a2.metric("Clientes a recuperar", number(clientes_priorizados))
     a3.metric("Zonas a empujar", number(zonas_priorizadas))
 
-    plan_diario = build_daily_plan(radar_acciones)
     st.markdown("#### Plan diario recomendado")
     plan_cols = st.columns(len(plan_diario))
     for col, (_, row) in zip(plan_cols, plan_diario.iterrows()):
