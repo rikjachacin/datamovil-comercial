@@ -1626,33 +1626,6 @@ else:
     i3.metric("Zonas bajo ritmo", number(insights["below_pace"]))
     st.info(str(insights["message"]))
 
-    ranking_df = desempeno_df.copy()
-    ranking_df["cumplimiento_pct"] = ranking_df["cumplimiento"] * 100
-    ranking_df["ritmo_pct"] = ranking_df["ritmo"] * 100
-    ranking_df = ranking_df[
-        [
-            "zona",
-            "ventas_mes",
-            "objetivo",
-            "cumplimiento_pct",
-            "ritmo_pct",
-            "proyeccion_cierre",
-            "brecha_objetivo",
-            "venta_diaria_necesaria",
-            "brecha_esperada",
-            "tiene_objetivo",
-            "estado",
-        ]
-    ]
-    ranking_df.loc[~ranking_df["tiene_objetivo"], "estado"] = "Sin objetivo"
-    ranking_df = ranking_df.sort_values(
-        ["cumplimiento_pct", "ventas_mes"],
-        ascending=[True, False],
-    )
-    st.markdown("#### Ranking de cumplimiento")
-    st.caption("Ordenado de menor a mayor cumplimiento para ver primero donde hace falta empujar.")
-    st.markdown(render_ranking_table(ranking_df), unsafe_allow_html=True)
-
 st.divider()
 
 ventas_dia = siscor_db.ventas_por_dia(desde_sql, hasta_sql, zonas_filtro)
