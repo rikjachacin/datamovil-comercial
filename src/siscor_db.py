@@ -27,6 +27,7 @@ SNAPSHOT_DIR = Path("data")
 SAMPLE_FACTURAS_PATH = SNAPSHOT_DIR / "sample_facturas.csv"
 SAMPLE_FACTURA_ITEMS_PATH = SNAPSHOT_DIR / "sample_factura_items.csv"
 SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
+SAMPLE_CREDITOS_PATH = SNAPSHOT_DIR / "sample_creditos.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
@@ -201,6 +202,18 @@ def _snapshot_clientes() -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _snapshot_creditos() -> pd.DataFrame:
+    try:
+        df = _read_snapshot_csv("creditos.csv", SAMPLE_CREDITOS_PATH)
+    except SnapshotDataMissing:
+        return pd.DataFrame(columns=_credit_columns())
+
+    df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
+    df["cliente"] = df["cliente"].fillna("")
+    return df
+
+
 def _snapshot_filtered_facturas(
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
@@ -327,6 +340,61 @@ def _credit_rule(segment: object) -> tuple[str, int, float, str]:
         "Sin historial - riesgo inicial": ("C", 0, 0.0, "Contado hasta regularizar"),
     }
     return rules.get(str(segment or "").strip(), ("B", 7, 0.3, "Revisar manualmente"))
+
+
+def _credit_columns() -> list[str]:
+    return [
+        "cliente",
+        "zona",
+        "dias_deuda",
+        "importe_deuda",
+        "saldo_vencido",
+        "dias_credito_sugerido",
+        "limite_compra_sugerido",
+        "categoria_abc",
+        "segmento_pago",
+        "recomendacion_credito",
+    ]
+
+
+def _credit_profile_from_raw(raw: pd.DataFrame, meses_venta: int = 12) -> pd.DataFrame:
+    if raw.empty:
+        return pd.DataFrame(columns=_credit_columns())
+
+    out = raw.copy()
+    for column in ("monto_facturado", "saldo_actual", "saldo_vencido", "atraso_actual"):
+        out[column] = pd.to_numeric(out.get(column, 0), errors="coerce").fillna(0).clip(lower=0)
+
+    rule_values = out["segmento_pago"].fillna("").apply(_credit_rule)
+    out["categoria_abc"] = rule_values.apply(lambda item: item[0])
+    out["dias_credito_sugerido"] = rule_values.apply(lambda item: item[1])
+    out["factor_tope"] = rule_values.apply(lambda item: item[2])
+    out["recomendacion_credito"] = rule_values.apply(lambda item: item[3])
+
+    critical_overdue = (out["saldo_vencido"] > 0) & (out["atraso_actual"] >= 45)
+    warning_overdue = (out["saldo_vencido"] > 0) & (out["atraso_actual"] >= 15) & ~critical_overdue
+
+    out.loc[critical_overdue, "categoria_abc"] = "C"
+    out.loc[critical_overdue, "dias_credito_sugerido"] = 0
+    out.loc[critical_overdue, "factor_tope"] = 0.0
+    out.loc[critical_overdue, "recomendacion_credito"] = "Contado hasta regularizar deuda vencida"
+
+    out.loc[warning_overdue & (out["categoria_abc"] == "A"), "categoria_abc"] = "B"
+    out.loc[warning_overdue, "dias_credito_sugerido"] = out.loc[
+        warning_overdue,
+        "dias_credito_sugerido",
+    ].clip(upper=7)
+    out.loc[warning_overdue, "factor_tope"] = out.loc[warning_overdue, "factor_tope"].clip(upper=1.0)
+    out.loc[warning_overdue, "recomendacion_credito"] = "Vender con compromiso de pago"
+
+    promedio_mensual = out["monto_facturado"] / meses_venta if meses_venta else 0
+    out["limite_compra_sugerido"] = (promedio_mensual * out["factor_tope"]).apply(_round_to_thousand)
+    out.loc[out["categoria_abc"] == "C", "limite_compra_sugerido"] = 0
+    out.loc[out["categoria_abc"] == "C", "dias_credito_sugerido"] = 0
+    out["dias_deuda"] = out["atraso_actual"]
+    out["importe_deuda"] = out["saldo_actual"]
+
+    return out.loc[:, _credit_columns()]
 
 
 def zonas() -> pd.DataFrame:
@@ -863,32 +931,29 @@ def cliente_credito(
     meses_venta: int = 12,
     meses_pago: int = 24,
 ) -> pd.DataFrame:
-    columns = [
-        "dias_deuda",
-        "importe_deuda",
-        "saldo_vencido",
-        "dias_credito_sugerido",
-        "limite_compra_sugerido",
-        "categoria_abc",
-        "segmento_pago",
-        "recomendacion_credito",
-    ]
+    columns = [column for column in _credit_columns() if column not in ("cliente", "zona")]
     if data_mode() == "snapshot":
-        return pd.DataFrame(
-            [
-                {
-                    "dias_deuda": 0,
-                    "importe_deuda": 0,
-                    "saldo_vencido": 0,
-                    "dias_credito_sugerido": 0,
-                    "limite_compra_sugerido": 0,
-                    "categoria_abc": "Sin datos",
-                    "segmento_pago": "Sin datos de cobranza",
-                    "recomendacion_credito": "Disponible solo con conexion a SisCor.",
-                }
-            ],
-            columns=columns,
-        )
+        creditos = _snapshot_creditos()
+        creditos = creditos[creditos["cliente"].astype(str) == cliente]
+        if zonas_filtro:
+            creditos = creditos[creditos["zona"].isin(zonas_filtro)]
+        if creditos.empty:
+            return pd.DataFrame(
+                [
+                    {
+                        "dias_deuda": 0,
+                        "importe_deuda": 0,
+                        "saldo_vencido": 0,
+                        "dias_credito_sugerido": 0,
+                        "limite_compra_sugerido": 0,
+                        "categoria_abc": "Sin datos",
+                        "segmento_pago": "Cliente no encontrado en snapshot de credito",
+                        "recomendacion_credito": "Actualizar datos de credito desde SisCor.",
+                    }
+                ],
+                columns=columns,
+            )
+        return creditos.loc[:, columns].head(1)
 
     zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
     cliente_ids_df = read_sql(
@@ -1015,47 +1080,9 @@ def cliente_credito(
     if profile.empty:
         return pd.DataFrame(columns=columns)
 
-    row = profile.iloc[0]
-    segmento = str(row.get("segmento_pago", ""))
-    categoria, dias_credito, factor_tope, recomendacion = _credit_rule(segmento)
-    saldo_actual = max(float(row.get("saldo_actual", 0) or 0), 0)
-    saldo_vencido = max(float(row.get("saldo_vencido", 0) or 0), 0)
-    atraso_actual = max(float(row.get("atraso_actual", 0) or 0), 0)
-    monto_facturado = max(float(row.get("monto_facturado", 0) or 0), 0)
-
-    if saldo_vencido > 0 and atraso_actual >= 45:
-        categoria = "C"
-        dias_credito = 0
-        factor_tope = 0.0
-        recomendacion = "Contado hasta regularizar deuda vencida"
-    elif saldo_vencido > 0 and atraso_actual >= 15:
-        if categoria == "A":
-            categoria = "B"
-        dias_credito = min(dias_credito, 7)
-        factor_tope = min(factor_tope, 1.0)
-        recomendacion = "Vender con compromiso de pago"
-
-    promedio_mensual = monto_facturado / meses_venta if meses_venta else 0
-    limite_compra = _round_to_thousand(promedio_mensual * factor_tope)
-    if categoria == "C":
-        limite_compra = 0
-        dias_credito = 0
-
-    return pd.DataFrame(
-        [
-            {
-                "dias_deuda": atraso_actual,
-                "importe_deuda": saldo_actual,
-                "saldo_vencido": saldo_vencido,
-                "dias_credito_sugerido": dias_credito,
-                "limite_compra_sugerido": limite_compra,
-                "categoria_abc": categoria,
-                "segmento_pago": segmento,
-                "recomendacion_credito": recomendacion,
-            }
-        ],
-        columns=columns,
-    )
+    profile["cliente"] = cliente
+    profile["zona"] = zonas_filtro[0] if zonas_filtro else "Sin zona"
+    return _credit_profile_from_raw(profile, meses_venta).loc[:, columns]
 
 
 def estrategia_cliente(
@@ -1415,6 +1442,107 @@ def export_clientes_snapshot() -> pd.DataFrame:
         ORDER BY cliente;
         """
     )
+
+
+def export_creditos_snapshot(meses_venta: int = 12, meses_pago: int = 24) -> pd.DataFrame:
+    signed_balance = _signed_balance("f", "saldo")
+    raw = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH clientes AS (
+            SELECT DISTINCT
+                c.id_cliente,
+                COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente,
+                COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') AS zona
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+              AND COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') NOT IN ('PROVEEDORES')
+        ),
+        ventas AS (
+            SELECT
+                f.id_cliente,
+                ISNULL(SUM({_signed_total("f", "total")}), 0) AS monto_facturado
+            FROM dbo.cli_factura f
+            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.fecha >= DATEADD(month, -?, GETDATE())
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+            GROUP BY f.id_cliente
+        ),
+        pagos AS (
+            SELECT
+                f.id_cliente,
+                COUNT(*) AS facturas_cobradas,
+                AVG(CAST(DATEDIFF(day, f.fecha, f.fecha_liquidacion) AS decimal(18, 2))) AS dias_promedio_pago,
+                MAX(DATEDIFF(day, f.fecha, f.fecha_liquidacion)) AS peor_pago,
+                SUM(CASE WHEN DATEDIFF(day, f.fecha, f.fecha_liquidacion) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) AS pagos_31_60,
+                SUM(CASE WHEN DATEDIFF(day, f.fecha, f.fecha_liquidacion) > 60 THEN 1 ELSE 0 END) AS pagos_mas_60
+            FROM dbo.cli_factura f
+            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND ISNULL(f.cobrado, 0) = 1
+              AND f.fecha_liquidacion IS NOT NULL
+              AND DATEDIFF(day, f.fecha, f.fecha_liquidacion) >= 0
+              AND f.fecha >= DATEADD(month, -?, GETDATE())
+              {_commercial_zone_filter("f")}
+              {_credit_document_filter("f")}
+            GROUP BY f.id_cliente
+        ),
+        deuda AS (
+            SELECT
+                f.id_cliente,
+                ISNULL(SUM(CASE WHEN f.saldo <> 0 THEN {signed_balance} ELSE 0 END), 0) AS saldo_actual,
+                ISNULL(SUM(CASE WHEN f.saldo <> 0
+                    AND CAST(COALESCE(f.fecha_vencimiento, f.fecha) AS date) < CAST(GETDATE() AS date)
+                    THEN {signed_balance} ELSE 0 END), 0) AS saldo_vencido,
+                ISNULL(MAX(CASE WHEN f.saldo <> 0
+                    THEN DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE())
+                    ELSE 0 END), 0) AS atraso_actual
+            FROM dbo.cli_factura f
+            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.saldo <> 0
+              {_commercial_zone_filter("f")}
+              {_balance_document_filter("f")}
+            GROUP BY f.id_cliente
+        )
+        SELECT
+            c.cliente,
+            c.zona,
+            COALESCE(v.monto_facturado, 0) AS monto_facturado,
+            COALESCE(d.saldo_actual, 0) AS saldo_actual,
+            COALESCE(d.saldo_vencido, 0) AS saldo_vencido,
+            COALESCE(d.atraso_actual, 0) AS atraso_actual,
+            CASE
+                WHEN COALESCE(p.facturas_cobradas, 0) < 3 AND COALESCE(d.saldo_actual, 0) <= 0 THEN 'Sin historial - limpio'
+                WHEN COALESCE(p.facturas_cobradas, 0) < 3 AND COALESCE(d.saldo_vencido, 0) > 0 THEN 'Sin historial - riesgo inicial'
+                WHEN COALESCE(p.facturas_cobradas, 0) < 3 AND COALESCE(d.saldo_actual, 0) > 0 THEN 'Sin historial - observar'
+                WHEN p.dias_promedio_pago <= 7 AND 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) <= 10 THEN 'Bueno'
+                WHEN p.dias_promedio_pago <= 20
+                    AND 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) <= 20
+                    AND 100.0 * p.pagos_mas_60 / NULLIF(p.facturas_cobradas, 0) <= 10 THEN 'Normal'
+                WHEN 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) >= 70
+                    AND COALESCE(d.saldo_vencido, 0) > 0 THEN 'Riesgoso'
+                WHEN p.dias_promedio_pago <= 45 OR 100.0 * (p.pagos_31_60 + p.pagos_mas_60) / NULLIF(p.facturas_cobradas, 0) <= 45 THEN 'Lento habitual'
+                WHEN p.dias_promedio_pago <= 70 OR 100.0 * p.pagos_mas_60 / NULLIF(p.facturas_cobradas, 0) <= 35 THEN 'Riesgoso'
+                ELSE 'Malo'
+            END AS segmento_pago
+        FROM clientes c
+        LEFT JOIN ventas v ON v.id_cliente = c.id_cliente
+        LEFT JOIN pagos p ON p.id_cliente = c.id_cliente
+        LEFT JOIN deuda d ON d.id_cliente = c.id_cliente
+        ORDER BY c.cliente;
+        """,
+        (meses_venta, meses_pago),
+    )
+    return _credit_profile_from_raw(raw, meses_venta)
 
 
 def stock_resumen() -> pd.DataFrame:
