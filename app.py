@@ -1645,8 +1645,13 @@ else:
         ]
     ]
     ranking_df.loc[~ranking_df["tiene_objetivo"], "estado"] = "Sin objetivo"
-    st.markdown("#### Cumplimiento por zona")
-    st.markdown(render_goal_board(ranking_df), unsafe_allow_html=True)
+    ranking_df = ranking_df.sort_values(
+        ["cumplimiento_pct", "ventas_mes"],
+        ascending=[True, False],
+    )
+    st.markdown("#### Ranking de cumplimiento")
+    st.caption("Ordenado de menor a mayor cumplimiento para ver primero donde hace falta empujar.")
+    st.markdown(render_ranking_table(ranking_df), unsafe_allow_html=True)
 
 st.divider()
 
