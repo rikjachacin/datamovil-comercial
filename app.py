@@ -202,6 +202,82 @@ st.markdown(
         overflow-wrap: anywhere;
     }
 
+    .dm-module-heading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 26px 0 14px;
+        padding: 12px 14px;
+        border: 1px solid var(--module-border, var(--dm-border));
+        border-left: 6px solid var(--module-accent, var(--dm-accent));
+        border-radius: 8px;
+        background: var(--module-bg, #ffffff);
+        box-shadow: 0 8px 20px rgba(20, 36, 58, 0.04);
+    }
+
+    .dm-module-icon {
+        width: 30px;
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        background: var(--module-accent, var(--dm-accent));
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 800;
+        flex: 0 0 auto;
+    }
+
+    .dm-module-title {
+        color: var(--dm-text);
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1.15;
+    }
+
+    .dm-module-subtitle {
+        color: var(--dm-muted);
+        font-size: 13px;
+        margin-top: 3px;
+    }
+
+    .dm-module-sales {
+        --module-accent: #0f766e;
+        --module-bg: #ecfdf5;
+        --module-border: #b7eadb;
+    }
+
+    .dm-module-action {
+        --module-accent: #d49a00;
+        --module-bg: #fff8e6;
+        --module-border: #f2d88a;
+    }
+
+    .dm-module-detail {
+        --module-accent: #2563eb;
+        --module-bg: #eff6ff;
+        --module-border: #bfdbfe;
+    }
+
+    .dm-module-strategy {
+        --module-accent: #7c3aed;
+        --module-bg: #f5f3ff;
+        --module-border: #ddd6fe;
+    }
+
+    .dm-module-credit {
+        --module-accent: #15803d;
+        --module-bg: #f0fdf4;
+        --module-border: #bbf7d0;
+    }
+
+    .dm-module-products {
+        --module-accent: #dc2626;
+        --module-bg: #fff1f2;
+        --module-border: #fecdd3;
+    }
+
     @media (max-width: 720px) {
         .dm-metric-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -221,6 +297,26 @@ st.markdown(
 
         .dm-compact-value {
             font-size: 19px;
+        }
+
+        .dm-module-heading {
+            margin: 20px 0 12px;
+            padding: 10px 11px;
+            gap: 8px;
+        }
+
+        .dm-module-icon {
+            width: 26px;
+            height: 26px;
+            font-size: 14px;
+        }
+
+        .dm-module-title {
+            font-size: 19px;
+        }
+
+        .dm-module-subtitle {
+            font-size: 12px;
         }
     }
 
@@ -597,6 +693,20 @@ def render_metric_grid(items: list[tuple[str, str]]) -> str:
             "</div>"
         )
     return "<div class='dm-metric-grid'>" + "".join(cards) + "</div>"
+
+
+def render_module_heading(title: str, subtitle: str = "", kind: str = "sales", icon: str = "") -> str:
+    subtitle_html = f"<div class='dm-module-subtitle'>{html.escape(subtitle)}</div>" if subtitle else ""
+    icon_html = f"<div class='dm-module-icon'>{html.escape(icon)}</div>" if icon else ""
+    return (
+        f"<div class='dm-module-heading dm-module-{html.escape(kind)}'>"
+        f"{icon_html}"
+        "<div>"
+        f"<div class='dm-module-title'>{html.escape(title)}</div>"
+        f"{subtitle_html}"
+        "</div>"
+        "</div>"
+    )
 
 
 def seller_action_message(
@@ -1058,7 +1168,15 @@ if vista_vendedor_activa:
     )
     clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
 
-    st.subheader("Mi avance del mes" if periodo == "Mes en curso" else "Mi avance del periodo")
+    st.markdown(
+        render_module_heading(
+            "Mi avance del mes" if periodo == "Mes en curso" else "Mi avance del periodo",
+            "Resumen del objetivo, ritmo y brecha de la zona",
+            "sales",
+            "$",
+        ),
+        unsafe_allow_html=True,
+    )
     if vendedor_row is None:
         st.warning("Tu zona no tiene objetivo cargado para este mes.")
     else:
@@ -1118,6 +1236,15 @@ if vista_vendedor_activa:
                 "El objetivo del periodo se calcula proporcionalmente sobre los dias comerciales del mes."
             )
 
+    st.markdown(
+        render_module_heading(
+            "Recomendacion rapida",
+            "Clientes y producto foco para revisar hoy",
+            "action",
+            "!",
+        ),
+        unsafe_allow_html=True,
+    )
     st.info(
         seller_action_message(
             vendedor_row,
@@ -1126,6 +1253,16 @@ if vista_vendedor_activa:
             zonas_filtro,
             top_clientes_vendedor,
         )
+    )
+
+    st.markdown(
+        render_module_heading(
+            "Detalle vendedor",
+            "Plan de accion, clientes y productos principales",
+            "detail",
+            "D",
+        ),
+        unsafe_allow_html=True,
     )
 
     seccion_vendedor = st.radio(
@@ -1196,7 +1333,15 @@ if vista_vendedor_activa:
             },
         )
 
-    st.subheader("Estrategia cliente")
+    st.markdown(
+        render_module_heading(
+            "Estrategia cliente",
+            "Busca un cliente y revisa historial, credito y productos",
+            "strategy",
+            "E",
+        ),
+        unsafe_allow_html=True,
+    )
     clientes_opciones = sorted(
         pd.concat(
             [
@@ -1245,7 +1390,15 @@ if vista_vendedor_activa:
         credito_cliente = siscor_db.cliente_credito(cliente_seleccionado, zonas_filtro)
         if not credito_cliente.empty:
             credito_row = credito_cliente.iloc[0]
-            st.markdown("#### Perfil de credito sugerido")
+            st.markdown(
+                render_module_heading(
+                    "Perfil de credito sugerido",
+                    "Deuda actual y condiciones recomendadas",
+                    "credit",
+                    "C",
+                ),
+                unsafe_allow_html=True,
+            )
             dc1, dc2, dc3, dc4 = st.columns(4)
             dc1.metric("Dias deuda a la fecha", number(credito_row["dias_deuda"]))
             dc2.metric("Importe de deuda", money(credito_row["importe_deuda"]))
@@ -1258,7 +1411,15 @@ if vista_vendedor_activa:
 
         cprod, ccaidos = st.columns(2)
         with cprod:
-            st.markdown("#### Productos habituales")
+            st.markdown(
+                render_module_heading(
+                    "Productos habituales",
+                    "Lo que el cliente suele comprar",
+                    "detail",
+                    "P",
+                ),
+                unsafe_allow_html=True,
+            )
             st.dataframe(
                 productos_cliente,
                 use_container_width=True,
@@ -1270,7 +1431,15 @@ if vista_vendedor_activa:
                 },
             )
         with ccaidos:
-            st.markdown("#### Productos caidos")
+            st.markdown(
+                render_module_heading(
+                    "Productos caidos",
+                    "Oportunidades para recuperar rotacion",
+                    "products",
+                    "R",
+                ),
+                unsafe_allow_html=True,
+            )
             st.dataframe(
                 caidos_cliente,
                 use_container_width=True,
