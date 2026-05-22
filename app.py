@@ -1242,7 +1242,6 @@ if vista_vendedor_activa:
                         ("Dias periodo", workdays(dias_periodo_objetivo)),
                         ("Objetivo mensual", money(vendedor_row["objetivo"])),
                         ("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"])),
-                        ("Ritmo mes", percent(vendedor_row["ritmo"])),
                         ("Ticket promedio", money(ticket_promedio_periodo)),
                     ]
                 ),
