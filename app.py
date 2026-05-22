@@ -1171,7 +1171,7 @@ if vista_vendedor_activa:
     st.markdown(
         render_module_heading(
             "Mi avance del mes" if periodo == "Mes en curso" else "Mi avance del periodo",
-            "Resumen del objetivo, ritmo y brecha de la zona",
+            "Resumen del objetivo, ritmo y ticket de la zona",
             "sales",
             "$",
         ),
@@ -1191,7 +1191,15 @@ if vista_vendedor_activa:
                         ("Dias para vender", workdays(dias_restantes)),
                         ("Ritmo a la fecha", percent(vendedor_row["ritmo"])),
                         ("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"])),
-                        ("Brecha objetivo", money(vendedor_row["brecha_objetivo"])),
+                        (
+                            "Ticket promedio",
+                            money(
+                                numeric_value(vendedor_row["ventas_mes"])
+                                / numeric_value(vendedor_row["comprobantes"])
+                                if numeric_value(vendedor_row["comprobantes"])
+                                else 0
+                            ),
+                        ),
                     ]
                 ),
                 unsafe_allow_html=True,
@@ -1215,7 +1223,14 @@ if vista_vendedor_activa:
             cumplimiento_periodo = (
                 ventas_periodo_total / objetivo_periodo if objetivo_periodo else 0
             )
-            brecha_periodo = ventas_periodo_total - objetivo_periodo
+            comprobantes_periodo = (
+                ventas_periodo_vendedor["comprobantes"].sum()
+                if not ventas_periodo_vendedor.empty
+                else 0
+            )
+            ticket_promedio_periodo = (
+                ventas_periodo_total / comprobantes_periodo if comprobantes_periodo else 0
+            )
 
             st.markdown(
                 render_metric_grid(
@@ -1227,7 +1242,7 @@ if vista_vendedor_activa:
                         ("Objetivo mensual", money(vendedor_row["objetivo"])),
                         ("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"])),
                         ("Ritmo mes", percent(vendedor_row["ritmo"])),
-                        ("Brecha periodo", money(brecha_periodo)),
+                        ("Ticket promedio", money(ticket_promedio_periodo)),
                     ]
                 ),
                 unsafe_allow_html=True,
