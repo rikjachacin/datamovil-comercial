@@ -16,6 +16,7 @@ from src import siscor_db
 
 
 APP_NAME = "Bruncas Comercial"
+APP_BUILD = "2026-05-22.1235"
 LOGO_PATH = Path("assets/bruncas_logo.png")
 
 
