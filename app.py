@@ -1026,13 +1026,11 @@ def render_decision_room(
     card_html = []
     for label, title, note, color in cards:
         card_html.append(
-            f"""
-            <div class="dm-decision-card" style="--decision-accent:{html.escape(color)};">
-                <div class="dm-decision-label">{html.escape(label)}</div>
-                <div class="dm-decision-title">{html.escape(title)}</div>
-                <div class="dm-decision-note">{html.escape(note)}</div>
-            </div>
-            """
+            f'<div class="dm-decision-card" style="--decision-accent:{html.escape(color)};">'
+            f'<div class="dm-decision-label">{html.escape(label)}</div>'
+            f'<div class="dm-decision-title">{html.escape(title)}</div>'
+            f'<div class="dm-decision-note">{html.escape(note)}</div>'
+            "</div>"
         )
     return '<div class="dm-decision-grid">' + "".join(card_html) + "</div>"
 
