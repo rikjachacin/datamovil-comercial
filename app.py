@@ -538,6 +538,7 @@ def seller_action_message(
     clients: pd.DataFrame,
     products: pd.DataFrame,
     zonas: tuple[str, ...],
+    active_clients: pd.DataFrame | None = None,
 ) -> str:
     if performance_row is None:
         return "No hay objetivo asignado para esta zona. Revisar configuracion antes de evaluar desempeno."
@@ -557,8 +558,21 @@ def seller_action_message(
     else:
         base = "Necesitas recuperar ritmo. Prioriza visitas de clientes caidos y productos con baja frente al mes anterior."
 
-    if not clients.empty:
-        base += f" Primer cliente a revisar: {clients.iloc[0]['cliente']}."
+    client_names: list[str] = []
+    for source in (clients, active_clients):
+        if source is None or source.empty or "cliente" not in source.columns:
+            continue
+        for value in source["cliente"].dropna().astype(str):
+            clean_value = value.strip()
+            if clean_value and clean_value not in client_names:
+                client_names.append(clean_value)
+            if len(client_names) >= 5:
+                break
+        if len(client_names) >= 5:
+            break
+
+    if client_names:
+        base += " Clientes sugeridos para revisar: " + "; ".join(client_names[:5]) + "."
     if not products.empty:
         base += f" Producto foco: {products.iloc[0]['producto']}."
     return base
@@ -1032,7 +1046,15 @@ if vista_vendedor_activa:
                 "El objetivo del periodo se calcula proporcionalmente sobre los dias comerciales del mes."
             )
 
-    st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor, zonas_filtro))
+    st.info(
+        seller_action_message(
+            vendedor_row,
+            clientes_vendedor,
+            productos_vendedor,
+            zonas_filtro,
+            top_clientes_vendedor,
+        )
+    )
 
     seccion_vendedor = st.radio(
         "Detalle vendedor",
