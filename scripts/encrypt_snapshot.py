@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 
 
 DATA_DIR = Path("data")
-FILES = ("facturas.csv", "factura_items.csv", "objetivos.csv")
+FILES = ("facturas.csv", "factura_items.csv", "clientes.csv", "objetivos.csv")
 KEY_PATH = DATA_DIR / "snapshot.key"
 
 

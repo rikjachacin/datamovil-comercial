@@ -18,12 +18,15 @@ def main() -> None:
 
     facturas = siscor_db.export_facturas_snapshot()
     factura_items = siscor_db.export_factura_items_snapshot()
+    clientes = siscor_db.export_clientes_snapshot()
 
     facturas.to_csv(OUTPUT_DIR / "facturas.csv", index=False, encoding="utf-8-sig")
     factura_items.to_csv(OUTPUT_DIR / "factura_items.csv", index=False, encoding="utf-8-sig")
+    clientes.to_csv(OUTPUT_DIR / "clientes.csv", index=False, encoding="utf-8-sig")
 
     print(f"facturas.csv: {len(facturas):,} filas")
     print(f"factura_items.csv: {len(factura_items):,} filas")
+    print(f"clientes.csv: {len(clientes):,} filas")
 
 
 if __name__ == "__main__":

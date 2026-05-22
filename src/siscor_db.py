@@ -26,6 +26,7 @@ SISCOR_CONFIG_PATH = Path(r"C:\SisCor\SisCor.exe.config")
 SNAPSHOT_DIR = Path("data")
 SAMPLE_FACTURAS_PATH = SNAPSHOT_DIR / "sample_facturas.csv"
 SAMPLE_FACTURA_ITEMS_PATH = SNAPSHOT_DIR / "sample_factura_items.csv"
+SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
@@ -184,6 +185,20 @@ def _snapshot_facturas() -> pd.DataFrame:
 @st.cache_data(ttl=300, show_spinner=False)
 def _snapshot_factura_items() -> pd.DataFrame:
     return _read_snapshot_csv("factura_items.csv", SAMPLE_FACTURA_ITEMS_PATH)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _snapshot_clientes() -> pd.DataFrame:
+    try:
+        df = _read_snapshot_csv("clientes.csv", SAMPLE_CLIENTES_PATH)
+    except SnapshotDataMissing:
+        facturas = _snapshot_facturas().copy()
+        facturas["zona"] = facturas["zona"].fillna("").replace("", "Sin zona")
+        return facturas.loc[:, ["id_cliente", "cliente", "zona"]].drop_duplicates()
+
+    df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
+    df["cliente"] = df["cliente"].fillna("")
+    return df
 
 
 def _snapshot_filtered_facturas(
@@ -816,7 +831,10 @@ def _productos_a_impulsar_from_frames(actual: pd.DataFrame, anterior: pd.DataFra
 
 def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     if data_mode() == "snapshot":
-        df = _snapshot_filtered_facturas(zonas_filtro=zonas_filtro)
+        df = _snapshot_clientes()
+        df = df[~df["zona"].isin(EXCLUDED_COMMERCIAL_ZONES)]
+        if zonas_filtro:
+            df = df[df["zona"].isin(zonas_filtro)]
         if df.empty:
             return pd.DataFrame(columns=["cliente"])
         return pd.DataFrame({"cliente": sorted(df["cliente"].dropna().astype(str).unique())})
@@ -1050,6 +1068,22 @@ def estrategia_cliente(
     limite_productos: int = 8,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if data_mode() == "snapshot":
+        clientes = _snapshot_clientes()
+        clientes = clientes[clientes["cliente"].astype(str) == cliente]
+        if zonas_filtro:
+            clientes = clientes[clientes["zona"].isin(zonas_filtro)]
+        if clientes.empty:
+            resumen = pd.DataFrame(
+                {
+                    "venta_mes": [0],
+                    "venta_mes_anterior": [0],
+                    "comprobantes_mes": [0],
+                    "ultima_compra": [None],
+                }
+            )
+            productos = pd.DataFrame(columns=["producto", "cantidad", "total"])
+            caidos = pd.DataFrame(columns=["producto", "venta_mes", "venta_mes_anterior", "variacion"])
+            return resumen, productos, caidos
         actual = _snapshot_filtered_facturas(mes_actual_desde, fecha_hasta, zonas_filtro)
         anterior = _snapshot_filtered_facturas(mes_anterior_desde, mes_anterior_hasta, zonas_filtro)
         return _estrategia_cliente_from_frames(cliente, actual, anterior, limite_productos)
@@ -1361,6 +1395,25 @@ def export_factura_items_snapshot(months_back: int = 18) -> pd.DataFrame:
           AND f.tipo IN ('FC', 'NC', 'ND');
         """,
         (months_back,),
+    )
+
+
+def export_clientes_snapshot() -> pd.DataFrame:
+    return read_sql(
+        """
+        SET NOCOUNT ON;
+        SELECT DISTINCT
+            c.id_cliente,
+            COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente,
+            COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') AS zona
+        FROM dbo.cli_cliente c
+        INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+        LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+        WHERE ISNULL(c.activo, 0) = 1
+          AND ISNULL(cs.activo, 0) = 1
+          AND COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') NOT IN ('PROVEEDORES')
+        ORDER BY cliente;
+        """
     )
 
 
