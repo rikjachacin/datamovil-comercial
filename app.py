@@ -170,6 +170,60 @@ st.markdown(
         overflow-wrap: anywhere;
     }
 
+    .dm-metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+        gap: 14px;
+        margin: 0 0 14px;
+    }
+
+    .dm-compact-metric {
+        min-width: 0;
+        background: var(--dm-panel);
+        border: 1px solid var(--dm-border);
+        border-radius: 8px;
+        padding: 15px 17px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
+    }
+
+    .dm-compact-label {
+        color: var(--dm-muted);
+        font-size: 14px;
+        font-weight: 650;
+        line-height: 1.25;
+        margin-bottom: 8px;
+    }
+
+    .dm-compact-value {
+        color: var(--dm-text);
+        font-size: 24px;
+        font-weight: 520;
+        line-height: 1.14;
+        overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 720px) {
+        .dm-metric-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .dm-compact-metric {
+            min-height: 112px;
+            padding: 12px 13px;
+        }
+
+        .dm-compact-label {
+            font-size: 12.5px;
+            margin-bottom: 7px;
+        }
+
+        .dm-compact-value {
+            font-size: 19px;
+        }
+    }
+
     .stButton button {
         border-radius: 8px;
         border: 1px solid var(--dm-border-strong);
@@ -531,6 +585,18 @@ def render_goal_board(df: pd.DataFrame) -> str:
             "</div>"
         )
     return "<div class='dm-goal-board'>" + "".join(cards) + "</div>"
+
+
+def render_metric_grid(items: list[tuple[str, str]]) -> str:
+    cards = []
+    for label, value in items:
+        cards.append(
+            "<div class='dm-compact-metric'>"
+            f"<div class='dm-compact-label'>{html.escape(label)}</div>"
+            f"<div class='dm-compact-value'>{html.escape(value)}</div>"
+            "</div>"
+        )
+    return "<div class='dm-metric-grid'>" + "".join(cards) + "</div>"
 
 
 def seller_action_message(
@@ -997,19 +1063,21 @@ if vista_vendedor_activa:
         st.warning("Tu zona no tiene objetivo cargado para este mes.")
     else:
         if periodo == "Mes en curso":
-            v1, v2, v3 = st.columns(3)
-            v1.metric("Ventas mes", money(vendedor_row["ventas_mes"]))
-            v2.metric("Objetivo", money(vendedor_row["objetivo"]))
-            v3.metric("Cumplimiento", percent(vendedor_row["cumplimiento"]))
-
-            r1, r2, r3, r4 = st.columns(4)
-            r1.metric("Diario necesario", money(vendedor_row["venta_diaria_necesaria"]))
-            r2.metric("Dias para vender", workdays(dias_restantes))
-            r3.metric("Ritmo a la fecha", percent(vendedor_row["ritmo"]))
-            r4.metric("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"]))
-
-            b1, _ = st.columns([1, 3])
-            b1.metric("Brecha objetivo", money(vendedor_row["brecha_objetivo"]))
+            st.markdown(
+                render_metric_grid(
+                    [
+                        ("Ventas mes", money(vendedor_row["ventas_mes"])),
+                        ("Objetivo", money(vendedor_row["objetivo"])),
+                        ("Cumplimiento", percent(vendedor_row["cumplimiento"])),
+                        ("Diario necesario", money(vendedor_row["venta_diaria_necesaria"])),
+                        ("Dias para vender", workdays(dias_restantes)),
+                        ("Ritmo a la fecha", percent(vendedor_row["ritmo"])),
+                        ("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"])),
+                        ("Brecha objetivo", money(vendedor_row["brecha_objetivo"])),
+                    ]
+                ),
+                unsafe_allow_html=True,
+            )
         else:
             ventas_periodo_total = (
                 ventas_periodo_vendedor["total"].sum() if not ventas_periodo_vendedor.empty else 0
@@ -1031,17 +1099,21 @@ if vista_vendedor_activa:
             )
             brecha_periodo = ventas_periodo_total - objetivo_periodo
 
-            v1, v2, v3, v4 = st.columns(4)
-            v1.metric("Ventas periodo", money(ventas_periodo_total))
-            v2.metric("Objetivo periodo", money(objetivo_periodo))
-            v3.metric("Cumplimiento periodo", percent(cumplimiento_periodo))
-            v4.metric("Dias periodo", workdays(dias_periodo_objetivo))
-
-            r1, r2, r3, r4 = st.columns(4)
-            r1.metric("Objetivo mensual", money(vendedor_row["objetivo"]))
-            r2.metric("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"]))
-            r3.metric("Ritmo mes", percent(vendedor_row["ritmo"]))
-            r4.metric("Brecha periodo", money(brecha_periodo))
+            st.markdown(
+                render_metric_grid(
+                    [
+                        ("Ventas periodo", money(ventas_periodo_total)),
+                        ("Objetivo periodo", money(objetivo_periodo)),
+                        ("Cumplimiento periodo", percent(cumplimiento_periodo)),
+                        ("Dias periodo", workdays(dias_periodo_objetivo)),
+                        ("Objetivo mensual", money(vendedor_row["objetivo"])),
+                        ("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"])),
+                        ("Ritmo mes", percent(vendedor_row["ritmo"])),
+                        ("Brecha periodo", money(brecha_periodo)),
+                    ]
+                ),
+                unsafe_allow_html=True,
+            )
             st.caption(
                 "El objetivo del periodo se calcula proporcionalmente sobre los dias comerciales del mes."
             )
