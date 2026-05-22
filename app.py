@@ -1034,10 +1034,11 @@ if vista_vendedor_activa:
 
     st.info(seller_action_message(vendedor_row, clientes_vendedor, productos_vendedor, zonas_filtro))
 
-    seccion_vendedor = st.segmented_control(
+    seccion_vendedor = st.radio(
         "Detalle vendedor",
         ["Plan de accion", "Clientes", "Productos"],
-        default="Plan de accion",
+        index=0,
+        horizontal=True,
         label_visibility="collapsed",
         key="detalle_vendedor",
     )
