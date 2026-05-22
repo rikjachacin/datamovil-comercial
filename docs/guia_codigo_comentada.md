@@ -1,4 +1,4 @@
-# Guia comentada de DataMovil Comercial
+# Guia comentada de Bruncas Comercial
 
 Esta guia explica como esta armada la aplicacion para que puedas ir aprendiendo el proyecto sin tocar la base de datos de SisCor.
 

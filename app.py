@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 from datetime import timedelta
 import html
+from pathlib import Path
 import traceback
 
 import pandas as pd
@@ -13,8 +15,12 @@ from src import objectives
 from src import siscor_db
 
 
+APP_NAME = "Bruncas Comercial"
+LOGO_PATH = Path("assets/bruncas_logo.png")
+
+
 st.set_page_config(
-    page_title="DataMovil Comercial",
+    page_title=APP_NAME,
     layout="wide",
 )
 
@@ -88,12 +94,27 @@ st.markdown(
     }
 
     .dm-header {
+        display: flex;
+        align-items: center;
+        gap: 22px;
         border: 1px solid var(--dm-border);
         background: linear-gradient(135deg, #ffffff 0%, #eef7f5 48%, #eef3ff 100%);
         border-radius: 8px;
         padding: 20px 24px;
         margin-bottom: 18px;
         box-shadow: 0 10px 28px rgba(25, 40, 64, 0.08);
+    }
+
+    .dm-logo {
+        width: 178px;
+        max-width: 34vw;
+        height: auto;
+        object-fit: contain;
+        flex: 0 0 auto;
+    }
+
+    .dm-header-text {
+        min-width: 0;
     }
 
     .dm-title {
@@ -108,6 +129,24 @@ st.markdown(
         margin-top: 8px;
         color: var(--dm-muted);
         font-size: 15px;
+    }
+
+    @media (max-width: 720px) {
+        .dm-header {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 12px;
+            padding: 18px;
+        }
+
+        .dm-logo {
+            width: 150px;
+            max-width: 70vw;
+        }
+
+        .dm-title {
+            font-size: 29px;
+        }
     }
 
     [data-testid="stMetric"] {
@@ -688,14 +727,30 @@ def build_executive_brief(
     return "\n".join(lines)
 
 
+def logo_data_uri() -> str:
+    if not LOGO_PATH.exists():
+        return ""
+    encoded = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def app_header_html(subtitle: str) -> str:
+    logo_src = logo_data_uri()
+    logo_html = f'<img class="dm-logo" src="{logo_src}" alt="Bruncas">' if logo_src else ""
+    return f"""
+        <div class="dm-header">
+            {logo_html}
+            <div class="dm-header-text">
+                <div class="dm-title">{APP_NAME}</div>
+                <div class="dm-subtitle">{subtitle}</div>
+            </div>
+        </div>
+    """
+
+
 def login_screen() -> None:
     st.markdown(
-        """
-        <div class="dm-header">
-            <div class="dm-title">DataMovil Comercial</div>
-            <div class="dm-subtitle">Ingreso privado al panel comercial</div>
-        </div>
-        """,
+        app_header_html("Ingreso privado al panel comercial"),
         unsafe_allow_html=True,
     )
 
@@ -723,12 +778,7 @@ if "user" not in st.session_state:
 current_user: auth.User = st.session_state["user"]
 
 st.markdown(
-    """
-    <div class="dm-header">
-        <div class="dm-title">DataMovil Comercial</div>
-        <div class="dm-subtitle">Panel comercial conectado a datos reales de SisCor</div>
-    </div>
-    """,
+    app_header_html("Panel comercial conectado a datos reales de SisCor"),
     unsafe_allow_html=True,
 )
 

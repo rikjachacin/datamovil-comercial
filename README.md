@@ -1,4 +1,4 @@
-# DataMovil Comercial
+# Bruncas Comercial
 
 Aplicacion Streamlit para consultar datos comerciales reales desde SisCor.
 
@@ -19,4 +19,3 @@ Aplicacion Streamlit para consultar datos comerciales reales desde SisCor.
 ```powershell
 streamlit run app.py
 ```
-
