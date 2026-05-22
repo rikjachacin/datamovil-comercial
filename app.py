@@ -1216,14 +1216,14 @@ if vista_vendedor_activa:
                 periodo_objetivo_hasta,
             )
             dias_mes_objetivo = objectives.business_days_in_month(fecha_maxima)
-            objetivo_periodo = (
+            objetivo_mensual = numeric_value(vendedor_row["objetivo"])
+            meta_periodo = (
                 numeric_value(vendedor_row["objetivo"]) * dias_periodo_objetivo / dias_mes_objetivo
                 if dias_mes_objetivo
                 else 0
             )
-            cumplimiento_periodo = (
-                ventas_periodo_total / objetivo_periodo if objetivo_periodo else 0
-            )
+            cumplimiento_objetivo = ventas_periodo_total / objetivo_mensual if objetivo_mensual else 0
+            ritmo_periodo = ventas_periodo_total / meta_periodo if meta_periodo else 0
             comprobantes_periodo = (
                 ventas_periodo_vendedor["comprobantes"].sum()
                 if not ventas_periodo_vendedor.empty
@@ -1237,10 +1237,10 @@ if vista_vendedor_activa:
                 render_metric_grid(
                     [
                         ("Ventas periodo", money(ventas_periodo_total)),
-                        ("Objetivo periodo", money(objetivo_periodo)),
-                        ("Cumplimiento periodo", percent(cumplimiento_periodo)),
-                        ("Dias periodo", workdays(dias_periodo_objetivo)),
-                        ("Objetivo mensual", money(vendedor_row["objetivo"])),
+                        ("Objetivo mensual", money(objetivo_mensual)),
+                        ("Cumplimiento objetivo", percent(cumplimiento_objetivo)),
+                        ("Meta a la fecha", money(meta_periodo)),
+                        ("Ritmo periodo", percent(ritmo_periodo)),
                         ("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"])),
                         ("Ticket promedio", money(ticket_promedio_periodo)),
                     ]
@@ -1248,7 +1248,7 @@ if vista_vendedor_activa:
                 unsafe_allow_html=True,
             )
             st.caption(
-                "El objetivo del periodo se calcula proporcionalmente sobre los dias comerciales del mes."
+                "La meta a la fecha es proporcional a los dias comerciales seleccionados; el objetivo mensual no cambia."
             )
 
     st.markdown(
