@@ -37,11 +37,15 @@ st.markdown(
         --dm-muted: #66758a;
         --dm-accent: #0f7b6c;
         --dm-accent-2: #1f5eff;
+        --dm-brand-gold: #d9b51f;
+        --dm-brand-purple: #8d168f;
         --dm-sidebar: #f8fbfd;
     }
 
     .stApp {
         background:
+            radial-gradient(circle at 15% 0%, rgba(217, 181, 31, 0.10) 0, transparent 260px),
+            radial-gradient(circle at 85% 4%, rgba(141, 22, 143, 0.08) 0, transparent 280px),
             linear-gradient(180deg, #eef5fb 0%, #f7f9fc 260px, #f7f9fc 100%);
         color: var(--dm-text);
     }
@@ -54,9 +58,17 @@ st.markdown(
 
     [data-testid="stSidebar"] {
         background:
-            linear-gradient(180deg, #ffffff 0%, var(--dm-sidebar) 62%, #eef5f7 100%);
+            linear-gradient(180deg, #ffffff 0%, var(--dm-sidebar) 60%, #f5f8ec 100%);
         border-right: 1px solid var(--dm-border);
         box-shadow: 8px 0 28px rgba(20, 36, 58, 0.06);
+    }
+
+    [data-testid="stSidebar"]::before {
+        content: "";
+        display: block;
+        height: 4px;
+        margin: -1.3rem -1rem 1.1rem;
+        background: linear-gradient(90deg, var(--dm-brand-purple), var(--dm-brand-gold), var(--dm-accent));
     }
 
     [data-testid="stSidebar"] section {
@@ -77,7 +89,7 @@ st.markdown(
         height: 16px;
         margin-right: 8px;
         border-radius: 8px;
-        background: linear-gradient(180deg, var(--dm-accent), #2c74d6);
+        background: linear-gradient(180deg, var(--dm-brand-purple), var(--dm-brand-gold));
         vertical-align: -3px;
     }
 
@@ -99,11 +111,13 @@ st.markdown(
         align-items: center;
         gap: 22px;
         border: 1px solid var(--dm-border);
-        background: linear-gradient(135deg, #ffffff 0%, #eef7f5 48%, #eef3ff 100%);
+        border-top: 4px solid var(--dm-brand-gold);
+        background:
+            linear-gradient(135deg, #ffffff 0%, #eef7f5 48%, #eef3ff 100%);
         border-radius: 8px;
         padding: 20px 24px;
         margin-bottom: 18px;
-        box-shadow: 0 10px 28px rgba(25, 40, 64, 0.08);
+        box-shadow: 0 14px 34px rgba(25, 40, 64, 0.09);
     }
 
     .dm-logo {
@@ -153,6 +167,7 @@ st.markdown(
     [data-testid="stMetric"] {
         background: var(--dm-panel);
         border: 1px solid var(--dm-border);
+        border-top: 3px solid rgba(217, 181, 31, 0.72);
         border-radius: 8px;
         padding: 16px 18px;
         box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
@@ -182,6 +197,7 @@ st.markdown(
         min-width: 0;
         background: var(--dm-panel);
         border: 1px solid var(--dm-border);
+        border-top: 3px solid rgba(15, 123, 108, 0.50);
         border-radius: 8px;
         padding: 15px 17px;
         box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
@@ -214,6 +230,14 @@ st.markdown(
         border-radius: 8px;
         background: var(--module-bg, #ffffff);
         box-shadow: 0 8px 20px rgba(20, 36, 58, 0.04);
+    }
+
+    h1, h2, h3 {
+        letter-spacing: 0;
+    }
+
+    div[data-testid="stVerticalBlock"] > div:has(> hr) {
+        margin: 0.8rem 0;
     }
 
     .dm-module-icon {
@@ -325,7 +349,7 @@ st.markdown(
     .stButton button {
         border-radius: 8px;
         border: 1px solid var(--dm-border-strong);
-        background: #ffffff;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
         color: var(--dm-text);
         font-weight: 650;
         transition: all 120ms ease;
@@ -334,7 +358,8 @@ st.markdown(
     .stButton button:hover {
         border-color: var(--dm-accent);
         color: var(--dm-accent);
-        box-shadow: 0 8px 18px rgba(15, 123, 108, 0.12);
+        box-shadow: 0 8px 18px rgba(15, 123, 108, 0.14);
+        transform: translateY(-1px);
     }
 
     [data-baseweb="input"],
@@ -351,6 +376,7 @@ st.markdown(
         min-height: 178px;
         background: var(--dm-panel);
         border: 1px solid var(--dm-border);
+        border-top: 3px solid rgba(141, 22, 143, 0.22);
         border-radius: 8px;
         padding: 16px;
         box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
