@@ -30,6 +30,7 @@ SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
 SAMPLE_CREDITOS_PATH = SNAPSHOT_DIR / "sample_creditos.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
+SQL_QUERY_TTL_SECONDS = 30
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
 COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
 BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
@@ -164,7 +165,7 @@ def get_connection() -> pyodbc.Connection:
     return pyodbc.connect(connection_string(), timeout=8)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=SQL_QUERY_TTL_SECONDS, show_spinner=False)
 def read_sql(query: str, params: tuple[Any, ...] = ()) -> pd.DataFrame:
     with pyodbc.connect(connection_string(), timeout=8) as conn:
         with warnings.catch_warnings():

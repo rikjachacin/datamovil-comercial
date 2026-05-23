@@ -1112,6 +1112,9 @@ with st.sidebar:
 
         if st.button("Probar conexion", use_container_width=True):
             st.dataframe(siscor_db.ping(), use_container_width=True, hide_index=True)
+        if st.button("Actualizar datos", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
 try:
     limites = siscor_db.month_options().iloc[0]
