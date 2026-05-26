@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import timedelta
+from datetime import date, timedelta
 import html
 from pathlib import Path
 import traceback
@@ -1144,7 +1144,12 @@ with st.sidebar:
 
 try:
     limites = siscor_db.month_options().iloc[0]
-    fecha_maxima = pd.to_datetime(limites["fecha_maxima"]).date()
+    fecha_datos_maxima = pd.to_datetime(limites["fecha_maxima"]).date()
+    fecha_maxima = (
+        max(fecha_datos_maxima, date.today())
+        if siscor_db.data_mode() == "sql"
+        else fecha_datos_maxima
+    )
     fecha_minima = pd.to_datetime(limites["fecha_minima"]).date()
     zonas_df = siscor_db.zonas()
 except Exception as exc:
