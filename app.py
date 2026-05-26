@@ -1543,7 +1543,15 @@ if vista_vendedor_activa:
         st.info("No hay clientes disponibles para generar estrategia en esta zona.")
 
     if cliente_seleccionado:
-        resumen_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
+        resumen_periodo_cliente, _, _ = siscor_db.estrategia_cliente(
+            cliente_seleccionado,
+            desde_sql,
+            hasta_sql,
+            comparacion_desde_sql,
+            comparacion_hasta_sql,
+            zonas_filtro,
+        )
+        resumen_historial_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
             cliente_seleccionado,
             historial_cliente_desde.isoformat(),
             historial_cliente_hasta.isoformat(),
@@ -1551,21 +1559,22 @@ if vista_vendedor_activa:
             historial_cliente_anterior_hasta.isoformat(),
             zonas_filtro,
         )
-        resumen_row = resumen_cliente.iloc[0]
+        resumen_row = resumen_periodo_cliente.iloc[0]
+        resumen_historial_row = resumen_historial_cliente.iloc[0]
         venta_mes_cliente = numeric_value(resumen_row["venta_mes"])
         venta_anterior_cliente = numeric_value(resumen_row["venta_mes_anterior"])
-        ultima_compra = resumen_row["ultima_compra"]
+        ultima_compra = resumen_historial_row["ultima_compra"]
         ultima_compra_texto = "Sin movimiento" if pd.isna(ultima_compra) else pd.to_datetime(ultima_compra).strftime("%d/%m/%Y")
         ec1, ec2, ec3, ec4 = st.columns(4)
-        ec1.metric("Venta ultimos 2 anos", money(venta_mes_cliente))
-        ec2.metric("2 anos anteriores", money(venta_anterior_cliente))
+        ec1.metric("Venta periodo", money(venta_mes_cliente))
+        ec2.metric("Periodo anterior", money(venta_anterior_cliente))
         ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
         ec4.metric("Ultimo movimiento", ultima_compra_texto)
         st.caption(
-            f"Historial analizado: {historial_cliente_desde:%d/%m/%Y} al "
+            f"La recomendacion usa historial de 2 anos: {historial_cliente_desde:%d/%m/%Y} al "
             f"{historial_cliente_hasta:%d/%m/%Y}."
         )
-        st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente, zonas_filtro))
+        st.info(client_strategy_message(cliente_seleccionado, resumen_historial_row, caidos_cliente, zonas_filtro))
 
         credito_cliente = siscor_db.cliente_credito(cliente_seleccionado, zonas_filtro)
         if not credito_cliente.empty:
