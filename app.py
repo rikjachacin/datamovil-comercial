@@ -837,7 +837,7 @@ def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFra
     ultima_compra_texto = pd.to_datetime(ultima_compra).strftime("%d/%m/%Y") if tiene_historial else ""
 
     if venta_anterior <= 0 and venta_mes > 0:
-        message = f"{cliente} aparece activo este mes. Conviene sostener frecuencia y revisar productos complementarios."
+        message = f"{cliente} registra compra en los ultimos 2 anos. Conviene sostener frecuencia y revisar productos complementarios."
     elif venta_mes < 0 and tiene_historial:
         message = (
             f"{cliente} registra movimiento reciente con saldo negativo al {ultima_compra_texto}. "
@@ -845,9 +845,9 @@ def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFra
         )
     elif venta_mes <= 0 and venta_anterior > 0:
         if is_telemarketing:
-            message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para llamada o WhatsApp."
+            message = f"{cliente} compro en temporadas anteriores y no registra compra en los ultimos 2 anos. Prioridad alta para llamada o WhatsApp."
         else:
-            message = f"{cliente} compro el mes anterior y este mes no registra compra. Prioridad alta para contacto o visita."
+            message = f"{cliente} compro en temporadas anteriores y no registra compra en los ultimos 2 anos. Prioridad alta para contacto o visita."
     elif venta_mes <= 0 and venta_anterior <= 0 and tiene_historial:
         if is_telemarketing:
             message = f"{cliente} no registra compra reciente. Ultimo movimiento: {ultima_compra_texto}. Prioridad para reactivar por llamada o WhatsApp."
@@ -855,11 +855,11 @@ def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFra
             message = f"{cliente} no registra compra reciente. Ultimo movimiento: {ultima_compra_texto}. Prioridad para reactivar contacto o visita."
     elif variacion < 0:
         if is_telemarketing:
-            message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar el contacto en recuperar rotacion."
+            message = f"{cliente} bajo {money(abs(variacion))} contra las 2 temporadas anteriores. Enfocar el contacto en recuperar rotacion."
         else:
-            message = f"{cliente} bajo {money(abs(variacion))} frente al mes anterior. Enfocar la visita en recuperar rotacion."
+            message = f"{cliente} bajo {money(abs(variacion))} contra las 2 temporadas anteriores. Enfocar la visita en recuperar rotacion."
     else:
-        message = f"{cliente} viene por encima del mes anterior. Buscar ampliar ticket con productos complementarios."
+        message = f"{cliente} viene por encima de las 2 temporadas anteriores. Buscar ampliar ticket con productos complementarios."
 
     if not caidos.empty:
         message += f" Producto a recuperar: {caidos.iloc[0]['producto']}."
@@ -1267,6 +1267,14 @@ comparacion_hasta = fecha_desde - timedelta(days=1)
 comparacion_desde = comparacion_hasta - timedelta(days=periodo_dias - 1)
 comparacion_desde_sql = comparacion_desde.isoformat()
 comparacion_hasta_sql = comparacion_hasta.isoformat()
+historial_cliente_hasta = fecha_maxima
+historial_cliente_desde = (
+    pd.Timestamp(historial_cliente_hasta) - pd.DateOffset(years=2) + pd.Timedelta(days=1)
+).date()
+historial_cliente_anterior_hasta = historial_cliente_desde - timedelta(days=1)
+historial_cliente_anterior_desde = (
+    pd.Timestamp(historial_cliente_anterior_hasta) - pd.DateOffset(years=2) + pd.Timedelta(days=1)
+).date()
 
 kpi_df = siscor_db.kpis(desde_sql, hasta_sql, zonas_filtro).iloc[0]
 
@@ -1537,10 +1545,10 @@ if vista_vendedor_activa:
     if cliente_seleccionado:
         resumen_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
             cliente_seleccionado,
-            desde_sql,
-            hasta_sql,
-            comparacion_desde_sql,
-            comparacion_hasta_sql,
+            historial_cliente_desde.isoformat(),
+            historial_cliente_hasta.isoformat(),
+            historial_cliente_anterior_desde.isoformat(),
+            historial_cliente_anterior_hasta.isoformat(),
             zonas_filtro,
         )
         resumen_row = resumen_cliente.iloc[0]
@@ -1549,10 +1557,14 @@ if vista_vendedor_activa:
         ultima_compra = resumen_row["ultima_compra"]
         ultima_compra_texto = "Sin movimiento" if pd.isna(ultima_compra) else pd.to_datetime(ultima_compra).strftime("%d/%m/%Y")
         ec1, ec2, ec3, ec4 = st.columns(4)
-        ec1.metric("Venta periodo", money(venta_mes_cliente))
-        ec2.metric("Periodo anterior", money(venta_anterior_cliente))
+        ec1.metric("Venta ultimos 2 anos", money(venta_mes_cliente))
+        ec2.metric("2 anos anteriores", money(venta_anterior_cliente))
         ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
         ec4.metric("Ultimo movimiento", ultima_compra_texto)
+        st.caption(
+            f"Historial analizado: {historial_cliente_desde:%d/%m/%Y} al "
+            f"{historial_cliente_hasta:%d/%m/%Y}."
+        )
         st.info(client_strategy_message(cliente_seleccionado, resumen_row, caidos_cliente, zonas_filtro))
 
         credito_cliente = siscor_db.cliente_credito(cliente_seleccionado, zonas_filtro)

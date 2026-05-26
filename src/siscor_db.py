@@ -1165,7 +1165,7 @@ def estrategia_cliente(
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
               AND f.id_cliente IN ({cliente_placeholders})
-              AND f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
         )
@@ -1182,6 +1182,8 @@ def estrategia_cliente(
             mes_anterior_desde,
             mes_anterior_hasta,
             *cliente_ids,
+            mes_anterior_desde,
+            fecha_hasta,
         ),
     )
     productos = read_sql(
@@ -1203,10 +1205,10 @@ def estrategia_cliente(
                     THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
                     ELSE 0 END) AS total_anterior
                 ,
-                SUM(CASE WHEN f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
+                SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
                     THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
                     ELSE 0 END) AS cantidad_historica,
-                SUM(CASE WHEN f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
+                SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
                     THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
                     ELSE 0 END) AS total_historico
             FROM dbo.cli_factura_item fi
@@ -1215,7 +1217,7 @@ def estrategia_cliente(
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
               AND f.id_cliente IN ({cliente_placeholders})
-              AND f.fecha >= DATEADD(MONTH, -18, CAST(GETDATE() AS date))
+              AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
             GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
@@ -1244,7 +1246,13 @@ def estrategia_cliente(
             mes_anterior_hasta,
             mes_anterior_desde,
             mes_anterior_hasta,
+            mes_actual_desde,
+            fecha_hasta,
+            mes_actual_desde,
+            fecha_hasta,
             *cliente_ids,
+            mes_actual_desde,
+            fecha_hasta,
             limite_productos,
         ),
     )
@@ -1377,7 +1385,7 @@ def pedidos_pendientes(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     )
 
 
-def export_facturas_snapshot(months_back: int = 18) -> pd.DataFrame:
+def export_facturas_snapshot(months_back: int = 24) -> pd.DataFrame:
     return read_sql(
         """
         SET NOCOUNT ON;
@@ -1403,7 +1411,7 @@ def export_facturas_snapshot(months_back: int = 18) -> pd.DataFrame:
     )
 
 
-def export_factura_items_snapshot(months_back: int = 18) -> pd.DataFrame:
+def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
     return read_sql(
         """
         SET NOCOUNT ON;
