@@ -828,42 +828,74 @@ def seller_action_message(
     return base
 
 
-def client_strategy_message(cliente: str, resumen: pd.Series, caidos: pd.DataFrame, zonas: tuple[str, ...]) -> str:
+def client_strategy_message(
+    cliente: str,
+    resumen: pd.Series,
+    caidos: pd.DataFrame,
+    productos: pd.DataFrame,
+    zonas: tuple[str, ...],
+    fecha_referencia: object,
+) -> str:
     venta_mes = numeric_value(resumen.get("venta_mes"))
     venta_anterior = numeric_value(resumen.get("venta_mes_anterior"))
-    variacion = venta_mes - venta_anterior
     is_telemarketing = is_telemarketing_zone(zonas)
     ultima_compra = resumen.get("ultima_compra")
     tiene_historial = not pd.isna(ultima_compra)
-    ultima_compra_texto = pd.to_datetime(ultima_compra).strftime("%d/%m/%Y") if tiene_historial else ""
+    ultima_compra_fecha = pd.to_datetime(ultima_compra).date() if tiene_historial else None
+    ultima_compra_texto = ultima_compra_fecha.strftime("%d/%m/%Y") if ultima_compra_fecha else ""
+    fecha_base = pd.to_datetime(fecha_referencia).date()
+    dias_sin_movimiento = (fecha_base - ultima_compra_fecha).days if ultima_compra_fecha else None
+    canal = "llamada o WhatsApp" if is_telemarketing else "contacto o visita"
 
-    if venta_anterior <= 0 and venta_mes > 0:
-        message = f"{cliente} registra compra en los ultimos 2 anos. Conviene sostener frecuencia y revisar productos complementarios."
-    elif venta_mes < 0 and tiene_historial:
-        message = (
-            f"{cliente} registra movimiento reciente con saldo negativo al {ultima_compra_texto}. "
-            "Revisar nota de credito/devolucion antes de impulsar nueva venta."
-        )
-    elif venta_mes <= 0 and venta_anterior > 0:
-        if is_telemarketing:
-            message = f"{cliente} compro en temporadas anteriores y no registra compra en los ultimos 2 anos. Prioridad alta para llamada o WhatsApp."
-        else:
-            message = f"{cliente} compro en temporadas anteriores y no registra compra en los ultimos 2 anos. Prioridad alta para contacto o visita."
-    elif venta_mes <= 0 and venta_anterior <= 0 and tiene_historial:
-        if is_telemarketing:
-            message = f"{cliente} no registra compra reciente. Ultimo movimiento: {ultima_compra_texto}. Prioridad para reactivar por llamada o WhatsApp."
-        else:
-            message = f"{cliente} no registra compra reciente. Ultimo movimiento: {ultima_compra_texto}. Prioridad para reactivar contacto o visita."
-    elif variacion < 0:
-        if is_telemarketing:
-            message = f"{cliente} bajo {money(abs(variacion))} contra las 2 temporadas anteriores. Enfocar el contacto en recuperar rotacion."
-        else:
-            message = f"{cliente} bajo {money(abs(variacion))} contra las 2 temporadas anteriores. Enfocar la visita en recuperar rotacion."
-    else:
-        message = f"{cliente} viene por encima de las 2 temporadas anteriores. Buscar ampliar ticket con productos complementarios."
+    productos_habituales = []
+    if not productos.empty and "producto" in productos.columns:
+        productos_habituales = [str(value) for value in productos["producto"].dropna().head(3)]
 
     if not caidos.empty:
-        message += f" Producto a recuperar: {caidos.iloc[0]['producto']}."
+        caido = caidos.iloc[0]
+        producto_caido = str(caido["producto"])
+        perdida = abs(numeric_value(caido.get("variacion", 0)))
+        message = (
+            f"{cliente}: oportunidad concreta en historial de 2 anos. "
+            f"Recuperar {producto_caido}"
+        )
+        if perdida:
+            message += f", caida aproximada {money(perdida)}"
+        message += f". Accion sugerida: abrir {canal} con reposicion de ese producto."
+    elif dias_sin_movimiento is not None and dias_sin_movimiento > 120:
+        message = (
+            f"{cliente}: lleva {dias_sin_movimiento} dias sin movimiento "
+            f"(ultimo {ultima_compra_texto}). Accion sugerida: reactivar por {canal}"
+        )
+        if productos_habituales:
+            message += f" ofreciendo reposicion de {', '.join(productos_habituales[:2])}"
+        message += "."
+    elif venta_mes < 0 and tiene_historial:
+        message = (
+            f"{cliente}: movimiento reciente con saldo negativo al {ultima_compra_texto}. "
+            "Antes de vender, revisar nota de credito/devolucion y confirmar si corresponde reponer."
+        )
+    elif productos_habituales:
+        message = (
+            f"{cliente}: tiene patron de compra estable. Productos habituales: "
+            f"{', '.join(productos_habituales)}. Accion sugerida: validar stock, reposicion y sumar complemento."
+        )
+    elif venta_mes <= 0 and venta_anterior > 0:
+        message = (
+            f"{cliente}: tuvo compra en temporadas anteriores, pero no aparece movimiento reciente. "
+            f"Accion sugerida: recuperar por {canal} con una propuesta corta."
+        )
+    elif tiene_historial:
+        message = (
+            f"{cliente}: ultimo movimiento {ultima_compra_texto}. "
+            "No hay producto caido claro; revisar necesidad actual antes de empujar volumen."
+        )
+    else:
+        message = (
+            f"{cliente}: no hay historial suficiente en la ventana analizada. "
+            "Accion sugerida: tratar como cliente a diagnosticar y confirmar necesidad principal."
+        )
+
     return message
 
 
@@ -1604,7 +1636,16 @@ if vista_vendedor_activa:
             f"La recomendacion usa historial de 2 anos: {historial_cliente_desde:%d/%m/%Y} al "
             f"{historial_cliente_hasta:%d/%m/%Y}."
         )
-        st.info(client_strategy_message(cliente_seleccionado, resumen_historial_row, caidos_cliente, zonas_filtro))
+        st.info(
+            client_strategy_message(
+                cliente_seleccionado,
+                resumen_historial_row,
+                caidos_cliente,
+                productos_cliente,
+                zonas_filtro,
+                historial_cliente_hasta,
+            )
+        )
 
         credito_cliente = siscor_db.cliente_credito(cliente_seleccionado, zonas_filtro)
         if not credito_cliente.empty:
