@@ -9,6 +9,7 @@ import traceback
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src import auth
 from src import objectives
@@ -1088,6 +1089,28 @@ def app_header_html(subtitle: str) -> str:
     """
 
 
+def set_session_cookie(token: str) -> None:
+    components.html(
+        f"""
+        <script>
+        document.cookie = "{auth.SESSION_COOKIE_NAME}={token}; max-age={auth.SESSION_MAX_AGE_SECONDS}; path=/; SameSite=Lax";
+        </script>
+        """,
+        height=0,
+    )
+
+
+def clear_session_cookie() -> None:
+    components.html(
+        f"""
+        <script>
+        document.cookie = "{auth.SESSION_COOKIE_NAME}=; max-age=0; path=/; SameSite=Lax";
+        </script>
+        """,
+        height=0,
+    )
+
+
 def login_screen() -> None:
     st.markdown(
         app_header_html("Ingreso privado al panel comercial"),
@@ -1108,12 +1131,18 @@ def login_screen() -> None:
                 st.error("Usuario o contrasena incorrectos.")
             else:
                 st.session_state["user"] = user
+                set_session_cookie(auth.create_session_token(user))
                 st.rerun()
 
 
 if "user" not in st.session_state:
-    login_screen()
-    st.stop()
+    cookie_user = auth.user_from_session_token(st.context.cookies.get(auth.SESSION_COOKIE_NAME))
+    if cookie_user is not None:
+        st.session_state["user"] = cookie_user
+        st.rerun()
+    else:
+        login_screen()
+        st.stop()
 
 current_user: auth.User = st.session_state["user"]
 
@@ -1127,6 +1156,7 @@ with st.sidebar:
     st.write(current_user.name)
     st.caption("Administrador" if current_user.is_admin else "Zona asignada")
     if st.button("Cerrar sesion", use_container_width=True):
+        clear_session_cookie()
         st.session_state.clear()
         st.rerun()
 
