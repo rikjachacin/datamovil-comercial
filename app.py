@@ -1145,11 +1145,7 @@ with st.sidebar:
 try:
     limites = siscor_db.month_options().iloc[0]
     fecha_datos_maxima = pd.to_datetime(limites["fecha_maxima"]).date()
-    fecha_maxima = (
-        max(fecha_datos_maxima, date.today())
-        if siscor_db.data_mode() == "sql"
-        else fecha_datos_maxima
-    )
+    fecha_maxima = max(fecha_datos_maxima, date.today())
     fecha_minima = pd.to_datetime(limites["fecha_minima"]).date()
     zonas_df = siscor_db.zonas()
 except Exception as exc:
