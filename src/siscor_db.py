@@ -32,6 +32,7 @@ SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 SQL_QUERY_TTL_SECONDS = 30
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
+EXCLUDED_PRODUCT_NAMES = ("DESCUENTO PAGO CDO",)
 COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
 BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
@@ -291,6 +292,26 @@ def _commercial_zone_filter(alias: str) -> str:
 def _commercial_document_filter(alias: str) -> str:
     included = ", ".join(f"'{doc_type}'" for doc_type in COMMERCIAL_DOCUMENT_TYPES)
     return f" AND {alias}.tipo IN ({included})"
+
+
+def _product_name_expr(item_alias: str = "fi", product_alias: str = "p") -> str:
+    return (
+        f"COALESCE(NULLIF({item_alias}.descripcion, ''), "
+        f"{product_alias}.descripcion, CONCAT('Producto ', {item_alias}.id_producto))"
+    )
+
+
+def _commercial_product_filter(product_expr: str) -> str:
+    excluded = ", ".join(f"'{name}'" for name in EXCLUDED_PRODUCT_NAMES)
+    return f" AND UPPER(LTRIM(RTRIM({product_expr}))) NOT IN ({excluded})"
+
+
+def _filter_commercial_products(df: pd.DataFrame, column: str = "producto") -> pd.DataFrame:
+    if df.empty or column not in df.columns:
+        return df
+    names = {name.upper().strip() for name in EXCLUDED_PRODUCT_NAMES}
+    mask = ~df[column].fillna("").astype(str).str.upper().str.strip().isin(names)
+    return df.loc[mask].copy()
 
 
 def _credit_document_filter(alias: str) -> str:
@@ -612,6 +633,7 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
         df["producto"] = df["producto"].fillna("")
         empty_product = df["producto"] == ""
         df.loc[empty_product, "producto"] = "Producto " + df.loc[empty_product, "id_producto"].astype(str)
+        df = _filter_commercial_products(df)
         return (
             df.groupby("producto", as_index=False)
             .agg(cantidad=("cantidad_firmada", "sum"), total=("total_firmado", "sum"))
@@ -620,11 +642,12 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
         )
 
     zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    product_expr = _product_name_expr("fi", "p")
     return read_sql(
         f"""
         SET NOCOUNT ON;
         SELECT TOP (?)
-            COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+            {product_expr} AS producto,
             SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad,
             SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS total
         FROM dbo.cli_factura_item fi
@@ -635,8 +658,9 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
+          {_commercial_product_filter(product_expr)}
           {zona_sql}
-        GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+        GROUP BY {product_expr}
         ORDER BY total DESC;
         """,
         (limite, fecha_desde, fecha_hasta, *zona_params),
@@ -785,13 +809,14 @@ def productos_a_impulsar(
         return _productos_a_impulsar_from_frames(actual, anterior, limite)
 
     zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    product_expr = _product_name_expr("fi", "p")
     return read_sql(
         f"""
         SET NOCOUNT ON;
         WITH actual AS (
             SELECT
                 fi.id_producto,
-                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                {product_expr} AS producto,
                 SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad_mes,
                 SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes
             FROM dbo.cli_factura_item fi
@@ -802,13 +827,14 @@ def productos_a_impulsar(
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
+              {_commercial_product_filter(product_expr)}
               {zona_sql}
-            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+            GROUP BY fi.id_producto, {product_expr}
         ),
         anterior AS (
             SELECT
                 fi.id_producto,
-                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                {product_expr} AS producto,
                 SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad_mes_anterior,
                 SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes_anterior
             FROM dbo.cli_factura_item fi
@@ -819,8 +845,9 @@ def productos_a_impulsar(
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
+              {_commercial_product_filter(product_expr)}
               {zona_sql}
-            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+            GROUP BY fi.id_producto, {product_expr}
         )
         SELECT TOP (?)
             COALESCE(a.producto, p.producto) AS producto,
@@ -875,6 +902,7 @@ def _productos_a_impulsar_from_frames(actual: pd.DataFrame, anterior: pd.DataFra
         temp["producto"] = temp["producto"].fillna("")
         empty_product = temp["producto"] == ""
         temp.loc[empty_product, "producto"] = "Producto " + temp.loc[empty_product, "id_producto"].astype(str)
+        temp = _filter_commercial_products(temp)
         return (
             temp.groupby(["id_producto", "producto"], as_index=False)
             .agg(**{qty_name: (qty_name, "sum"), total_name: (total_name, "sum")})
@@ -1186,12 +1214,13 @@ def estrategia_cliente(
             fecha_hasta,
         ),
     )
+    product_expr = _product_name_expr("fi", "p")
     productos = read_sql(
         f"""
         SET NOCOUNT ON;
         WITH productos AS (
             SELECT
-                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                {product_expr} AS producto,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
                     THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
                     ELSE 0 END) AS cantidad,
@@ -1220,7 +1249,8 @@ def estrategia_cliente(
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-            GROUP BY COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+              {_commercial_product_filter(product_expr)}
+            GROUP BY {product_expr}
         )
         SELECT TOP (?)
             producto,
@@ -1262,7 +1292,7 @@ def estrategia_cliente(
         WITH actual AS (
             SELECT
                 fi.id_producto,
-                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                {product_expr} AS producto,
                 SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
@@ -1273,12 +1303,13 @@ def estrategia_cliente(
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+              {_commercial_product_filter(product_expr)}
+            GROUP BY fi.id_producto, {product_expr}
         ),
         anterior AS (
             SELECT
                 fi.id_producto,
-                COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+                {product_expr} AS producto,
                 SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes_anterior
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
@@ -1289,7 +1320,8 @@ def estrategia_cliente(
               AND CAST(f.fecha AS date) BETWEEN ? AND ?
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
-            GROUP BY fi.id_producto, COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto))
+              {_commercial_product_filter(product_expr)}
+            GROUP BY fi.id_producto, {product_expr}
         )
         SELECT TOP (?)
             p.producto,
@@ -1342,6 +1374,10 @@ def _estrategia_cliente_from_frames(
         sign = base["tipo"].map(lambda value: -1 if value == "NC" else 1)
         base[qty_name] = base["cantidad"].astype(float) * sign
         base[total_name] = base["total"].astype(float) * sign
+        base["producto"] = base["producto"].fillna("")
+        empty_product = base["producto"] == ""
+        base.loc[empty_product, "producto"] = "Producto " + base.loc[empty_product, "id_producto"].astype(str)
+        base = _filter_commercial_products(base)
         return (
             base.groupby(["id_producto", "producto"], as_index=False)
             .agg(**{qty_name: (qty_name, "sum"), total_name: (total_name, "sum")})
@@ -1412,13 +1448,14 @@ def export_facturas_snapshot(months_back: int = 24) -> pd.DataFrame:
 
 
 def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
+    product_expr = _product_name_expr("fi", "p")
     return read_sql(
-        """
+        f"""
         SET NOCOUNT ON;
         SELECT
             fi.id_facturacion,
             fi.id_producto,
-            COALESCE(NULLIF(fi.descripcion, ''), p.descripcion, CONCAT('Producto ', fi.id_producto)) AS producto,
+            {product_expr} AS producto,
             CAST(fi.cantidad AS decimal(18, 2)) AS cantidad,
             CAST(fi.total AS decimal(18, 2)) AS total
         FROM dbo.cli_factura_item fi
@@ -1428,6 +1465,7 @@ def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND ISNULL(f.autorizado, 0) = 1
           AND f.fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(f.zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
+          {_commercial_product_filter(product_expr)}
           AND f.tipo IN ('FC', 'NC', 'ND');
         """,
         (months_back,),
