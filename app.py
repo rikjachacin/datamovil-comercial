@@ -304,41 +304,6 @@ st.markdown(
         --module-border: #fecdd3;
     }
 
-    .dm-recommendation-card {
-        margin: 0 0 18px;
-        padding: 16px 18px;
-        border: 1px solid #bfdbfe;
-        border-left: 6px solid #2563eb;
-        border-radius: 8px;
-        background: #eff6ff;
-        box-shadow: 0 10px 24px rgba(20, 36, 58, 0.06);
-    }
-
-    .dm-recommendation-label {
-        color: #64748b;
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        margin-bottom: 4px;
-    }
-
-    .dm-recommendation-client {
-        color: #0f172a;
-        font-size: 17px;
-        font-weight: 800;
-        line-height: 1.2;
-        margin-bottom: 8px;
-        overflow-wrap: anywhere;
-    }
-
-    .dm-recommendation-text {
-        color: #1e3a8a;
-        font-size: 16px;
-        line-height: 1.45;
-        overflow-wrap: anywhere;
-    }
-
     @media (max-width: 720px) {
         .dm-metric-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -378,18 +343,6 @@ st.markdown(
 
         .dm-module-subtitle {
             font-size: 12px;
-        }
-
-        .dm-recommendation-card {
-            padding: 14px 16px;
-        }
-
-        .dm-recommendation-client {
-            font-size: 16px;
-        }
-
-        .dm-recommendation-text {
-            font-size: 15px;
         }
 
     }
@@ -873,107 +826,6 @@ def seller_action_message(
     if not products.empty:
         base += f" Producto foco: {products.iloc[0]['producto']}."
     return base
-
-
-def client_strategy_message(
-    cliente: str,
-    resumen: pd.Series,
-    caidos: pd.DataFrame,
-    productos: pd.DataFrame,
-    zonas: tuple[str, ...],
-    fecha_referencia: object,
-    credito: pd.DataFrame | None = None,
-) -> str:
-    venta_mes = numeric_value(resumen.get("venta_mes"))
-    venta_anterior = numeric_value(resumen.get("venta_mes_anterior"))
-    is_telemarketing = is_telemarketing_zone(zonas)
-    ultima_compra = resumen.get("ultima_compra")
-    tiene_historial = not pd.isna(ultima_compra)
-    ultima_compra_fecha = pd.to_datetime(ultima_compra).date() if tiene_historial else None
-    ultima_compra_texto = ultima_compra_fecha.strftime("%d/%m/%Y") if ultima_compra_fecha else ""
-    fecha_base = pd.to_datetime(fecha_referencia).date()
-    dias_sin_movimiento = (fecha_base - ultima_compra_fecha).days if ultima_compra_fecha else None
-    canal = "llamada o WhatsApp" if is_telemarketing else "contacto o visita"
-
-    productos_habituales = []
-    if not productos.empty and "producto" in productos.columns:
-        productos_habituales = [str(value) for value in productos["producto"].dropna().head(3)]
-
-    credito_row = None if credito is None or credito.empty else credito.iloc[0]
-    dias_deuda = numeric_value(credito_row.get("dias_deuda")) if credito_row is not None else 0
-    importe_deuda = numeric_value(credito_row.get("importe_deuda")) if credito_row is not None else 0
-    limite_sugerido = numeric_value(credito_row.get("limite_compra_sugerido")) if credito_row is not None else 0
-    dias_credito = numeric_value(credito_row.get("dias_credito_sugerido")) if credito_row is not None else 0
-    segmento = str(credito_row.get("categoria_abc", "")).strip() if credito_row is not None else ""
-    segmento_pago = str(credito_row.get("segmento_pago", "")).strip() if credito_row is not None else ""
-
-    if importe_deuda > 0 and dias_deuda > 0:
-        message = (
-            f"{cliente}: antes de vender, ordenar deuda. Registra {money(importe_deuda)} "
-            f"con {number(dias_deuda)} dias de atraso"
-        )
-        if segmento:
-            message += f" y segmento {segmento}"
-        message += f". Accion sugerida: abrir {canal} para acordar pago o regularizacion"
-        if limite_sugerido > 0:
-            message += f"; despues trabajar una compra controlada hasta {money(limite_sugerido)}"
-        elif dias_credito <= 0:
-            message += "; por ahora manejar contado hasta regularizar"
-        message += "."
-    elif not caidos.empty:
-        caido = caidos.iloc[0]
-        producto_caido = str(caido["producto"])
-        perdida = abs(numeric_value(caido.get("variacion", 0)))
-        message = f"{cliente}: oportunidad concreta para recuperar {producto_caido}"
-        if perdida:
-            message += f", caida aproximada {money(perdida)}"
-        message += f". Accion sugerida: abrir {canal} con reposicion de ese producto."
-    elif dias_sin_movimiento is not None and dias_sin_movimiento > 120:
-        message = (
-            f"{cliente}: lleva {dias_sin_movimiento} dias sin movimiento "
-            f"(ultimo {ultima_compra_texto}). Accion sugerida: reactivar por {canal}"
-        )
-        if productos_habituales:
-            message += f" ofreciendo reposicion de {', '.join(productos_habituales[:2])}"
-        message += "."
-    elif venta_mes < 0 and tiene_historial:
-        message = (
-            f"{cliente}: movimiento reciente con saldo negativo al {ultima_compra_texto}. "
-            "Antes de vender, revisar nota de credito/devolucion y confirmar si corresponde reponer."
-        )
-    elif productos_habituales:
-        message = (
-            f"{cliente}: tiene patron de compra estable. Productos habituales: "
-            f"{', '.join(productos_habituales)}. Accion sugerida: validar stock, reposicion y sumar complemento."
-        )
-    elif venta_mes <= 0 and venta_anterior > 0:
-        message = (
-            f"{cliente}: tuvo compra en temporadas anteriores, pero no aparece movimiento reciente. "
-            f"Accion sugerida: recuperar por {canal} con una propuesta corta."
-        )
-    elif tiene_historial:
-        message = (
-            f"{cliente}: ultimo movimiento {ultima_compra_texto}. "
-            "No hay producto caido claro; revisar necesidad actual antes de empujar volumen."
-        )
-    else:
-        message = (
-            f"{cliente}: no hay historial suficiente en la ventana analizada. "
-            "Accion sugerida: tratar como cliente a diagnosticar y confirmar necesidad principal."
-        )
-
-    if importe_deuda <= 0 and credito_row is not None and (limite_sugerido > 0 or segmento_pago):
-        extras = []
-        if limite_sugerido > 0:
-            extras.append(f"limite sugerido {money(limite_sugerido)}")
-        if dias_credito > 0:
-            extras.append(f"credito sugerido {number(dias_credito)} dias")
-        if segmento_pago:
-            extras.append(segmento_pago)
-        if extras:
-            message += " Perfil comercial: " + ", ".join(extras) + "."
-
-    return message
 
 
 def build_action_radar(
@@ -1740,33 +1592,6 @@ if vista_vendedor_activa:
                 f"Segmento {credito_row['categoria_abc']} - "
                 f"{credito_row['segmento_pago']}. {credito_row['recomendacion_credito']}"
             )
-
-        st.markdown(
-            render_module_heading(
-                "Recomendacion para la visita",
-                "Generada con deuda, limite, actividad y productos del cliente",
-                "strategy",
-                "R",
-            ),
-            unsafe_allow_html=True,
-        )
-        recommendation_text = client_strategy_message(
-            cliente_seleccionado,
-            resumen_historial_row,
-            caidos_cliente,
-            productos_cliente,
-            zonas_filtro,
-            historial_cliente_hasta,
-            credito_cliente,
-        )
-        st.markdown(
-            "<div class='dm-recommendation-card'>"
-            "<div class='dm-recommendation-label'>Cliente seleccionado</div>"
-            f"<div class='dm-recommendation-client'>{html.escape(cliente_seleccionado)}</div>"
-            f"<div class='dm-recommendation-text'>{html.escape(recommendation_text)}</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
 
         cprod, ccaidos = st.columns(2)
         with cprod:
