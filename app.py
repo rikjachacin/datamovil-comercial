@@ -304,6 +304,41 @@ st.markdown(
         --module-border: #fecdd3;
     }
 
+    .dm-recommendation-card {
+        margin: 0 0 18px;
+        padding: 16px 18px;
+        border: 1px solid #bfdbfe;
+        border-left: 6px solid #2563eb;
+        border-radius: 8px;
+        background: #eff6ff;
+        box-shadow: 0 10px 24px rgba(20, 36, 58, 0.06);
+    }
+
+    .dm-recommendation-label {
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+    }
+
+    .dm-recommendation-client {
+        color: #0f172a;
+        font-size: 17px;
+        font-weight: 800;
+        line-height: 1.2;
+        margin-bottom: 8px;
+        overflow-wrap: anywhere;
+    }
+
+    .dm-recommendation-text {
+        color: #1e3a8a;
+        font-size: 16px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+    }
+
     @media (max-width: 720px) {
         .dm-metric-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -343,6 +378,18 @@ st.markdown(
 
         .dm-module-subtitle {
             font-size: 12px;
+        }
+
+        .dm-recommendation-card {
+            padding: 14px 16px;
+        }
+
+        .dm-recommendation-client {
+            font-size: 16px;
+        }
+
+        .dm-recommendation-text {
+            font-size: 15px;
         }
 
     }
@@ -1703,16 +1750,22 @@ if vista_vendedor_activa:
             ),
             unsafe_allow_html=True,
         )
-        st.info(
-            client_strategy_message(
-                cliente_seleccionado,
-                resumen_historial_row,
-                caidos_cliente,
-                productos_cliente,
-                zonas_filtro,
-                historial_cliente_hasta,
-                credito_cliente,
-            )
+        recommendation_text = client_strategy_message(
+            cliente_seleccionado,
+            resumen_historial_row,
+            caidos_cliente,
+            productos_cliente,
+            zonas_filtro,
+            historial_cliente_hasta,
+            credito_cliente,
+        )
+        st.markdown(
+            "<div class='dm-recommendation-card'>"
+            "<div class='dm-recommendation-label'>Cliente seleccionado</div>"
+            f"<div class='dm-recommendation-client'>{html.escape(cliente_seleccionado)}</div>"
+            f"<div class='dm-recommendation-text'>{html.escape(recommendation_text)}</div>"
+            "</div>",
+            unsafe_allow_html=True,
         )
 
         cprod, ccaidos = st.columns(2)
