@@ -302,15 +302,19 @@ def _product_name_expr(item_alias: str = "fi", product_alias: str = "p") -> str:
 
 
 def _commercial_product_filter(product_expr: str) -> str:
-    excluded = ", ".join(f"'{name}'" for name in EXCLUDED_PRODUCT_NAMES)
-    return f" AND UPPER(LTRIM(RTRIM({product_expr}))) NOT IN ({excluded})"
+    excluded_conditions = " AND ".join(
+        f"UPPER(LTRIM(RTRIM({product_expr}))) NOT LIKE '%{name.replace(' ', '%')}%'"
+        for name in EXCLUDED_PRODUCT_NAMES
+    )
+    return f" AND {excluded_conditions}"
 
 
 def _filter_commercial_products(df: pd.DataFrame, column: str = "producto") -> pd.DataFrame:
     if df.empty or column not in df.columns:
         return df
-    names = {name.upper().strip() for name in EXCLUDED_PRODUCT_NAMES}
-    mask = ~df[column].fillna("").astype(str).str.upper().str.strip().isin(names)
+    patterns = [re.compile(".*".join(re.escape(part) for part in name.upper().split())) for name in EXCLUDED_PRODUCT_NAMES]
+    normalized = df[column].fillna("").astype(str).str.upper().str.strip()
+    mask = ~normalized.map(lambda value: any(pattern.search(value) for pattern in patterns))
     return df.loc[mask].copy()
 
 
