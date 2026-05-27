@@ -3,7 +3,10 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 import html
+import json
+import os
 from pathlib import Path
+import re
 import traceback
 
 import pandas as pd
@@ -899,6 +902,137 @@ def client_strategy_message(
     return message
 
 
+def openai_settings() -> tuple[str, str] | None:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    model = os.getenv("OPENAI_MODEL", "").strip()
+    try:
+        openai_secret = st.secrets.get("openai", {})
+        api_key = api_key or str(openai_secret.get("api_key", "")).strip()
+        model = model or str(openai_secret.get("model", "")).strip()
+    except Exception:
+        pass
+
+    if not api_key:
+        return None
+    return api_key, model or "gpt-5"
+
+
+def compact_records(df: pd.DataFrame, columns: list[str], limit: int = 5) -> list[dict[str, object]]:
+    if df.empty:
+        return []
+    available = [column for column in columns if column in df.columns]
+    if not available:
+        return []
+    records = df.loc[:, available].head(limit).to_dict("records")
+    return [{key: normalize_ai_value(value) for key, value in row.items()} for row in records]
+
+
+def normalize_ai_value(value: object) -> object:
+    if pd.isna(value):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def build_ai_visit_context(
+    cliente: str,
+    zonas: tuple[str, ...],
+    fecha_desde: date,
+    fecha_hasta: date,
+    resumen_periodo: pd.Series,
+    resumen_historial: pd.Series,
+    credito: pd.DataFrame,
+    productos: pd.DataFrame,
+    caidos: pd.DataFrame,
+) -> dict[str, object]:
+    credito_data: dict[str, object] = {}
+    if not credito.empty:
+        credito_data = {
+            key: normalize_ai_value(value)
+            for key, value in credito.iloc[0].to_dict().items()
+            if key
+            in {
+                "categoria_abc",
+                "segmento_pago",
+                "dias_deuda",
+                "importe_deuda",
+                "dias_credito_sugerido",
+                "limite_compra_sugerido",
+                "recomendacion_credito",
+            }
+        }
+
+    return {
+        "cliente": cliente,
+        "zona": ", ".join(zonas),
+        "tipo_contacto": "llamada o WhatsApp" if is_telemarketing_zone(zonas) else "visita o contacto comercial",
+        "periodo": {"desde": fecha_desde.isoformat(), "hasta": fecha_hasta.isoformat()},
+        "ventas": {
+            "venta_periodo": numeric_value(resumen_periodo.get("venta_mes")),
+            "venta_periodo_anterior": numeric_value(resumen_periodo.get("venta_mes_anterior")),
+            "variacion": numeric_value(resumen_periodo.get("venta_mes"))
+            - numeric_value(resumen_periodo.get("venta_mes_anterior")),
+            "ultima_compra": normalize_ai_value(resumen_historial.get("ultima_compra")),
+        },
+        "credito": credito_data,
+        "productos_habituales": compact_records(productos, ["producto", "cantidad", "total"], limit=5),
+        "productos_caidos": compact_records(
+            caidos,
+            ["producto", "venta_mes", "venta_mes_anterior", "variacion"],
+            limit=5,
+        ),
+    }
+
+
+def generate_ai_visit_recommendation(context: dict[str, object]) -> str:
+    settings = openai_settings()
+    if settings is None:
+        return (
+            "Falta configurar la clave de OpenAI. Agregar OPENAI_API_KEY como variable de entorno "
+            "o [openai].api_key en secrets.toml."
+        )
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return "Falta instalar la libreria openai. Ejecutar la actualizacion de dependencias del proyecto."
+
+    api_key, model = settings
+    client = OpenAI(api_key=api_key)
+    system_prompt = (
+        "Sos un asistente comercial senior para una distribuidora veterinaria. "
+        "Usa solo los datos enviados por la app. No inventes compras, deuda, limites ni productos. "
+        "Si hay deuda vencida, prioriza una recomendacion prudente antes de empujar venta. "
+        "Distingui si el contacto es visita presencial o telemarketing. "
+        "Devolve una recomendacion breve, accionable y en espanol."
+    )
+    user_prompt = {
+        "tarea": "Generar recomendacion previa al contacto con el cliente.",
+        "formato": [
+            "Diagnostico en una frase",
+            "Estrategia de conversacion",
+            "Productos sugeridos o productos a recuperar",
+            "Cuidado por deuda/credito si aplica",
+            "Proximo paso concreto",
+        ],
+        "datos": context,
+    }
+    response = client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_prompt, ensure_ascii=False)},
+        ],
+        max_output_tokens=700,
+    )
+    return response.output_text.strip()
+
+
 def build_action_radar(
     performance: pd.DataFrame,
     clients: pd.DataFrame,
@@ -1663,6 +1797,39 @@ if vista_vendedor_activa:
                 f"Segmento {credito_row['categoria_abc']} - "
                 f"{credito_row['segmento_pago']}. {credito_row['recomendacion_credito']}"
             )
+
+        st.markdown(
+            render_module_heading(
+                "Recomendacion IA para la visita",
+                "Analiza ventas, deuda, limite y productos antes de contactar al cliente",
+                "strategy",
+                "IA",
+            ),
+            unsafe_allow_html=True,
+        )
+        ai_context = build_ai_visit_context(
+            cliente_seleccionado,
+            zonas_filtro,
+            fecha_desde,
+            fecha_hasta,
+            resumen_row,
+            resumen_historial_row,
+            credito_cliente,
+            productos_cliente,
+            caidos_cliente,
+        )
+        ai_key = "ai_recommendation_" + re.sub(r"[^a-zA-Z0-9]+", "_", cliente_seleccionado)
+        if st.button("Generar recomendacion IA", key=f"{ai_key}_button", use_container_width=True):
+            with st.spinner("Generando recomendacion..."):
+                try:
+                    st.session_state[ai_key] = generate_ai_visit_recommendation(ai_context)
+                except Exception as exc:
+                    st.session_state[ai_key] = (
+                        "No pude generar la recomendacion IA. "
+                        + "".join(traceback.format_exception_only(type(exc), exc)).strip()
+                    )
+        if ai_key in st.session_state:
+            st.info(st.session_state[ai_key])
 
         cprod, ccaidos = st.columns(2)
         with cprod:
