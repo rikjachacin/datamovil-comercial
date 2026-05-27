@@ -1215,6 +1215,7 @@ try:
     fecha_datos_maxima = pd.to_datetime(limites["fecha_maxima"]).date()
     fecha_maxima = max(fecha_datos_maxima, date.today())
     fecha_minima = pd.to_datetime(limites["fecha_minima"]).date()
+    fecha_hoy = min(max(date.today(), fecha_minima), fecha_maxima)
     zonas_df = siscor_db.zonas()
 except Exception as exc:
     snapshot_error = getattr(siscor_db, "SnapshotDataMissing", RuntimeError)
@@ -1268,7 +1269,13 @@ with st.sidebar:
         "Periodo",
         ["Mes en curso", "Ultimos 30 dias", "Rango"],
         default="Mes en curso",
+        key="periodo_selector",
     )
+    if st.session_state.get("_ultimo_periodo_selector") != periodo:
+        if periodo == "Rango":
+            st.session_state["fecha_desde_rango"] = fecha_hoy
+            st.session_state["fecha_hasta_rango"] = fecha_hoy
+        st.session_state["_ultimo_periodo_selector"] = periodo
 
     if periodo == "Mes en curso":
         fecha_desde = mes_actual_desde
@@ -1281,15 +1288,17 @@ with st.sidebar:
     else:
         fecha_desde = st.date_input(
             "Desde",
-            value=mes_actual_desde,
+            value=fecha_hoy,
             min_value=fecha_minima,
             max_value=fecha_maxima,
+            key="fecha_desde_rango",
         )
         fecha_hasta = st.date_input(
             "Hasta",
-            value=fecha_maxima,
+            value=fecha_hoy,
             min_value=fecha_minima,
             max_value=fecha_maxima,
+            key="fecha_hasta_rango",
         )
 
     zonas_disponibles = zonas_df["zona"].dropna().astype(str).tolist()
