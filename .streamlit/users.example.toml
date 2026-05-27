@@ -1,12 +1,11 @@
 [users.admin]
-password = "Bruncas2026!"
+password_hash = "pbkdf2_sha256$260000$pkYxUlshWf74SgmUklA5nctXXxjjbBdJ$21fifiw33YTRFzaY6_ojeatPBlDO_aw0gJ5p4o0lJqM"
 name = "Administrador"
 role = "admin"
 zones = ["*"]
 
 [users.david]
-password = "david2026"
+password_hash = "pbkdf2_sha256$260000$HjgJARd1Cd8Teznvcx8Yg-UxwpbUqOGr$5nJgG5f-rCfEXDgkP_zdPGooNUPqy3QtK_9-g80X2Vs"
 name = "David"
 role = "seller"
 zones = ["DAVID"]
-

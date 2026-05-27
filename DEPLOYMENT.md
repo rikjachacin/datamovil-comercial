@@ -95,9 +95,13 @@ datamovil_server.ovpn
 - No usar `sa` en produccion si se puede evitar.
 - Crear un usuario SQL solo lectura para DataMovil.
 - Usar HTTPS para el link externo.
-- Cambiar las contrasenas simples de prueba.
+- Usar `password_hash` en `.streamlit/users.toml`; no guardar contrasenas en texto plano.
+- Generar hashes con `.\.venv\Scripts\python.exe tools\hash_password.py`.
+- Configurar `[auth].session_secret` en `.streamlit/secrets.toml` con un texto largo aleatorio.
 - Mantener el archivo `.streamlit/users.toml` fuera de Git.
+- Mantener el archivo `.streamlit/secrets.toml` fuera de Git.
 - Restringir cada vendedor a su zona.
+- La app bloquea temporalmente usuarios con demasiados intentos fallidos.
 
 ## Pasos de despliegue en Windows Server
 
@@ -120,7 +124,7 @@ sqlcmd -S 10.8.0.1,50672 -d d_bruncas -U USUARIO_SOLO_LECTURA -P CLAVE -Q "SELEC
 ```
 
 8. Completar `.streamlit/secrets.toml` con credenciales del SQL.
-9. Completar `.streamlit/users.toml` con usuarios reales.
+9. Completar `.streamlit/users.toml` con usuarios reales usando `password_hash`.
 10. Iniciar DataMovil:
 
 ```powershell
@@ -138,4 +142,3 @@ sqlcmd -S 10.8.0.1,50672 -d d_bruncas -U USUARIO_SOLO_LECTURA -P CLAVE -Q "SELEC
 - PROVEEDORES excluido del tablero.
 - FC/ND suman, NC resta, PC queda fuera del total comercial.
 - Falta despliegue 24/7.
-

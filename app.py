@@ -1087,6 +1087,11 @@ def login_screen() -> None:
             submitted = st.form_submit_button("Ingresar", use_container_width=True)
 
         if submitted:
+            blocked_seconds = auth.login_block_seconds(username)
+            if blocked_seconds:
+                st.error(f"Demasiados intentos fallidos. Proba de nuevo en {blocked_seconds // 60 + 1} minutos.")
+                return
+
             user = auth.authenticate(username, password)
             if user is None:
                 st.error("Usuario o contrasena incorrectos.")
@@ -1253,7 +1258,11 @@ with st.sidebar:
             st.warning("Tu usuario no tiene una zona valida asignada.")
 
 zonas_filtro = tuple(str(value) for value in zona_seleccion)
-if not zonas_filtro and zonas_objetivo:
+if not current_user.is_admin and not zonas_filtro:
+    st.error("Tu usuario no tiene permisos para consultar datos comerciales. Revisar zona asignada.")
+    st.stop()
+
+if current_user.is_admin and not zonas_filtro and zonas_objetivo:
     zonas_filtro = zonas_objetivo
 
 if fecha_desde > fecha_hasta:

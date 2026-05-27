@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets
 import time
 import tomllib
 
@@ -16,6 +17,12 @@ from streamlit.errors import StreamlitSecretNotFoundError
 USERS_PATH = Path(".streamlit/users.toml")
 SESSION_COOKIE_NAME = "bruncas_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
+PASSWORD_HASH_ITERATIONS = 260_000
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCK_SECONDS = 15 * 60
+_RUNTIME_SESSION_SECRET = secrets.token_urlsafe(48)
+_LOGIN_ATTEMPTS: dict[str, tuple[int, float]] = {}
 
 
 @dataclass(frozen=True)
@@ -44,17 +51,80 @@ def load_users(path: Path = USERS_PATH) -> dict[str, dict[str, object]]:
     return data.get("users", {})
 
 
+def password_hash(password: str, salt: str | None = None) -> str:
+    raw_salt = salt or secrets.token_urlsafe(24)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        raw_salt.encode("utf-8"),
+        PASSWORD_HASH_ITERATIONS,
+    )
+    encoded_digest = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return f"{PASSWORD_HASH_ALGORITHM}${PASSWORD_HASH_ITERATIONS}${raw_salt}${encoded_digest}"
+
+
+def verify_password(password: str, raw_user: dict[str, object]) -> bool:
+    stored_hash = str(raw_user.get("password_hash", ""))
+    if stored_hash:
+        try:
+            algorithm, raw_iterations, salt, expected_digest = stored_hash.split("$", 3)
+            if algorithm != PASSWORD_HASH_ALGORITHM:
+                return False
+            digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(raw_iterations),
+            )
+            actual_digest = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+            return hmac.compare_digest(actual_digest, expected_digest)
+        except Exception:
+            return False
+
+    # Legacy compatibility: keep plaintext support only to avoid locking existing installs.
+    stored_password = str(raw_user.get("password", ""))
+    return bool(stored_password) and hmac.compare_digest(stored_password, password)
+
+
+def login_block_seconds(username: str) -> int:
+    normalized_username = username.strip().lower()
+    attempts, locked_until = _LOGIN_ATTEMPTS.get(normalized_username, (0, 0))
+    if attempts < LOGIN_MAX_ATTEMPTS or locked_until <= time.time():
+        return 0
+    return max(1, int(locked_until - time.time()))
+
+
+def register_login_failure(username: str) -> None:
+    normalized_username = username.strip().lower()
+    attempts, locked_until = _LOGIN_ATTEMPTS.get(normalized_username, (0, 0))
+    now = time.time()
+    if locked_until <= now:
+        attempts += 1
+    if attempts >= LOGIN_MAX_ATTEMPTS:
+        locked_until = now + LOGIN_LOCK_SECONDS
+    _LOGIN_ATTEMPTS[normalized_username] = (attempts, locked_until)
+
+
+def clear_login_failures(username: str) -> None:
+    _LOGIN_ATTEMPTS.pop(username.strip().lower(), None)
+
+
 def authenticate(username: str, password: str) -> User | None:
     normalized_username = username.strip().lower()
+    if login_block_seconds(normalized_username):
+        return None
+
     users = load_users()
     raw_user = users.get(normalized_username)
     if not raw_user:
+        register_login_failure(normalized_username)
         return None
 
-    stored_password = str(raw_user.get("password", ""))
-    if not hmac.compare_digest(stored_password, password):
+    if not verify_password(password, raw_user):
+        register_login_failure(normalized_username)
         return None
 
+    clear_login_failures(normalized_username)
     zones = tuple(str(zone) for zone in raw_user.get("zones", ()))
     return User(
         username=normalized_username,
@@ -95,7 +165,7 @@ def _session_secret() -> str:
     env_value = os.environ.get("BRUNCAS_SESSION_SECRET")
     if env_value:
         return env_value
-    return "bruncas-comercial-local-session"
+    return _RUNTIME_SESSION_SECRET
 
 
 def _sign(payload: str) -> str:

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 .streamlit/users.toml
+.streamlit/*.bak
 .env
 cloudflared*.log
 data/*.csv
