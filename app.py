@@ -1641,20 +1641,6 @@ if vista_vendedor_activa:
         ec2.metric("Periodo anterior", money(venta_anterior_cliente))
         ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
         ec4.metric("Ultimo movimiento", ultima_compra_texto)
-        st.caption(
-            f"La recomendacion usa historial de 2 anos: {historial_cliente_desde:%d/%m/%Y} al "
-            f"{historial_cliente_hasta:%d/%m/%Y}."
-        )
-        st.info(
-            client_strategy_message(
-                cliente_seleccionado,
-                resumen_historial_row,
-                caidos_cliente,
-                productos_cliente,
-                zonas_filtro,
-                historial_cliente_hasta,
-            )
-        )
 
         credito_cliente = siscor_db.cliente_credito(cliente_seleccionado, zonas_filtro)
         if not credito_cliente.empty:
