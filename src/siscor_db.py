@@ -110,6 +110,19 @@ def using_sample_snapshot() -> bool:
     )
 
 
+def _to_numeric_amount(values: Any) -> pd.Series:
+    raw = pd.Series(values).astype(str).str.strip()
+    raw = raw.str.replace("$", "", regex=False).str.replace(" ", "", regex=False)
+    has_comma = raw.str.contains(",", regex=False)
+    converted = raw.copy()
+    converted.loc[has_comma] = converted.loc[has_comma].str.replace(".", "", regex=False).str.replace(
+        ",", ".", regex=False
+    )
+    thousands_dot = converted.str.match(r"^-?\d{1,3}(\.\d{3})+$", na=False)
+    converted.loc[thousands_dot] = converted.loc[thousands_dot].str.replace(".", "", regex=False)
+    return pd.to_numeric(converted, errors="coerce").fillna(0)
+
+
 def _snapshot_key() -> str | None:
     env_key = os.getenv("DATAMOVIL_SNAPSHOT_KEY")
     if env_key:
@@ -236,8 +249,8 @@ def _snapshot_filtered_facturas(
         df = df[df["zona"].isin(zonas_filtro)]
 
     sign = df["tipo"].map(lambda value: -1 if value == "NC" else 1)
-    df["total_firmado"] = df["total"].astype(float) * sign
-    df["subtotal_firmado"] = df["subtotal"].astype(float) * sign
+    df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
+    df["subtotal_firmado"] = _to_numeric_amount(df["subtotal"]) * sign
     return df
 
 
@@ -632,8 +645,8 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
         if df.empty:
             return pd.DataFrame(columns=["producto", "cantidad", "total"])
         sign = df["tipo"].map(lambda value: -1 if value == "NC" else 1)
-        df["cantidad_firmada"] = df["cantidad"].astype(float) * sign
-        df["total_firmado"] = df["total"].astype(float) * sign
+        df["cantidad_firmada"] = _to_numeric_amount(df["cantidad"]) * sign
+        df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
         df["producto"] = df["producto"].fillna("")
         empty_product = df["producto"] == ""
         df.loc[empty_product, "producto"] = "Producto " + df.loc[empty_product, "id_producto"].astype(str)
@@ -901,8 +914,8 @@ def _productos_a_impulsar_from_frames(actual: pd.DataFrame, anterior: pd.DataFra
             return pd.DataFrame(columns=["id_producto", "producto", qty_name, total_name])
         temp = df.copy()
         sign = temp["tipo"].map(lambda value: -1 if value == "NC" else 1)
-        temp[qty_name] = temp["cantidad"].astype(float) * sign
-        temp[total_name] = temp["total"].astype(float) * sign
+        temp[qty_name] = _to_numeric_amount(temp["cantidad"]) * sign
+        temp[total_name] = _to_numeric_amount(temp["total"]) * sign
         temp["producto"] = temp["producto"].fillna("")
         empty_product = temp["producto"] == ""
         temp.loc[empty_product, "producto"] = "Producto " + temp.loc[empty_product, "id_producto"].astype(str)
@@ -1376,8 +1389,8 @@ def _estrategia_cliente_from_frames(
             return pd.DataFrame(columns=["id_producto", "producto", qty_name, total_name])
         base = facturas[["id_facturacion", "tipo"]].merge(items, on="id_facturacion", how="inner")
         sign = base["tipo"].map(lambda value: -1 if value == "NC" else 1)
-        base[qty_name] = base["cantidad"].astype(float) * sign
-        base[total_name] = base["total"].astype(float) * sign
+        base[qty_name] = _to_numeric_amount(base["cantidad"]) * sign
+        base[total_name] = _to_numeric_amount(base["total"]) * sign
         base["producto"] = base["producto"].fillna("")
         empty_product = base["producto"] == ""
         base.loc[empty_product, "producto"] = "Producto " + base.loc[empty_product, "id_producto"].astype(str)
