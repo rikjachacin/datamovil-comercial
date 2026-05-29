@@ -91,14 +91,27 @@ def get_config() -> SisCorConfig:
         return _config_from_siscor_file()
 
 
+def _has_sql_config() -> bool:
+    try:
+        secrets = st.secrets["siscor"]
+        required = ("server", "database", "username", "password")
+        return all(str(secrets.get(key, "")).strip() for key in required)
+    except Exception:
+        return SISCOR_CONFIG_PATH.exists()
+
+
 def data_mode() -> str:
     env_mode = os.getenv("DATAMOVIL_DATA_MODE")
     if env_mode:
         return env_mode.lower()
     try:
-        return str(st.secrets.get("data", {}).get("mode", "sql")).lower()
+        configured_mode = str(st.secrets.get("data", {}).get("mode", "sql")).lower()
     except StreamlitSecretNotFoundError:
+        configured_mode = "sql"
+
+    if configured_mode == "snapshot" and _has_sql_config():
         return "sql"
+    return configured_mode
 
 
 def using_sample_snapshot() -> bool:
