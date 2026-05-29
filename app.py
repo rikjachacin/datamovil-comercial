@@ -1051,6 +1051,7 @@ def app_header_html(subtitle: str) -> str:
 
 
 def set_session_cookie(token: str) -> None:
+    st.query_params[auth.SESSION_QUERY_PARAM] = token
     components.html(
         f"""
         <script>
@@ -1062,6 +1063,8 @@ def set_session_cookie(token: str) -> None:
 
 
 def clear_session_cookie() -> None:
+    if auth.SESSION_QUERY_PARAM in st.query_params:
+        del st.query_params[auth.SESSION_QUERY_PARAM]
     components.html(
         f"""
         <script>
@@ -1097,14 +1100,17 @@ def login_screen() -> None:
                 st.error("Usuario o contrasena incorrectos.")
             else:
                 st.session_state["user"] = user
-                set_session_cookie(auth.create_session_token(user))
+                token = auth.create_session_token(user)
+                set_session_cookie(token)
                 st.rerun()
 
 
 if "user" not in st.session_state:
-    cookie_user = auth.user_from_session_token(st.context.cookies.get(auth.SESSION_COOKIE_NAME))
-    if cookie_user is not None:
-        st.session_state["user"] = cookie_user
+    session_token = st.context.cookies.get(auth.SESSION_COOKIE_NAME) or st.query_params.get(auth.SESSION_QUERY_PARAM)
+    session_user = auth.user_from_session_token(session_token)
+    if session_user is not None:
+        st.session_state["user"] = session_user
+        set_session_cookie(session_token)
         st.rerun()
     else:
         login_screen()

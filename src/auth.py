@@ -16,6 +16,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 USERS_PATH = Path(".streamlit/users.toml")
 SESSION_COOKIE_NAME = "bruncas_session"
+SESSION_QUERY_PARAM = "bruncas_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_HASH_ITERATIONS = 260_000
