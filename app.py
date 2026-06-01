@@ -1291,6 +1291,14 @@ historial_cliente_anterior_desde = (
     pd.Timestamp(historial_cliente_anterior_hasta) - pd.DateOffset(years=2) + pd.Timedelta(days=1)
 ).date()
 
+cliente_comparacion_desde = comparacion_desde
+cliente_comparacion_hasta = comparacion_hasta
+cliente_comparacion_label = "Periodo anterior"
+if periodo == "Mes en curso":
+    cliente_comparacion_desde = mes_anterior_desde
+    cliente_comparacion_hasta = mes_anterior_hasta
+    cliente_comparacion_label = "Mes anterior"
+
 kpi_df = siscor_db.kpis(desde_sql, hasta_sql, zonas_filtro).iloc[0]
 
 if vista_vendedor_activa:
@@ -1562,8 +1570,8 @@ if vista_vendedor_activa:
             cliente_seleccionado,
             desde_sql,
             hasta_sql,
-            comparacion_desde_sql,
-            comparacion_hasta_sql,
+            cliente_comparacion_desde.isoformat(),
+            cliente_comparacion_hasta.isoformat(),
             zonas_filtro,
         )
         resumen_historial_cliente, productos_cliente, caidos_cliente = siscor_db.estrategia_cliente(
@@ -1582,7 +1590,7 @@ if vista_vendedor_activa:
         ultima_compra_texto = "Sin movimiento" if pd.isna(ultima_compra) else pd.to_datetime(ultima_compra).strftime("%d/%m/%Y")
         ec1, ec2, ec3, ec4 = st.columns(4)
         ec1.metric("Venta periodo", money(venta_mes_cliente))
-        ec2.metric("Periodo anterior", money(venta_anterior_cliente))
+        ec2.metric(cliente_comparacion_label, money(venta_anterior_cliente))
         ec3.metric("Variacion", money(venta_mes_cliente - venta_anterior_cliente))
         ec4.metric("Ultimo movimiento", ultima_compra_texto)
 
