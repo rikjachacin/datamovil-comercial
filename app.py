@@ -1282,6 +1282,13 @@ comparacion_hasta = fecha_desde - timedelta(days=1)
 comparacion_desde = comparacion_hasta - timedelta(days=periodo_dias - 1)
 comparacion_desde_sql = comparacion_desde.isoformat()
 comparacion_hasta_sql = comparacion_hasta.isoformat()
+accion_comparacion_desde = comparacion_desde
+accion_comparacion_hasta = comparacion_hasta
+accion_comparacion_label = "periodo anterior"
+if periodo == "Mes en curso":
+    accion_comparacion_desde = mes_anterior_desde
+    accion_comparacion_hasta = mes_anterior_hasta
+    accion_comparacion_label = "mes anterior"
 historial_cliente_hasta = fecha_maxima
 historial_cliente_desde = (
     pd.Timestamp(historial_cliente_hasta) - pd.DateOffset(years=2) + pd.Timedelta(days=1)
@@ -1331,8 +1338,8 @@ if vista_vendedor_activa:
     clientes_vendedor = siscor_db.clientes_a_recuperar(
         desde_sql,
         hasta_sql,
-        comparacion_desde_sql,
-        comparacion_hasta_sql,
+        accion_comparacion_desde.isoformat(),
+        accion_comparacion_hasta.isoformat(),
         zonas_filtro,
         limite=5,
     )
@@ -1340,8 +1347,8 @@ if vista_vendedor_activa:
     productos_vendedor = siscor_db.productos_a_impulsar(
         desde_sql,
         hasta_sql,
-        comparacion_desde_sql,
-        comparacion_hasta_sql,
+        accion_comparacion_desde.isoformat(),
+        accion_comparacion_hasta.isoformat(),
         zonas_filtro,
         limite=5,
     )
