@@ -1301,7 +1301,13 @@ historial_cliente_anterior_desde = (
 cliente_comparacion_desde = comparacion_desde
 cliente_comparacion_hasta = comparacion_hasta
 cliente_comparacion_label = "Periodo anterior"
-if periodo == "Mes en curso":
+cliente_en_mes_actual = (
+    fecha_desde.year == fecha_maxima.year
+    and fecha_desde.month == fecha_maxima.month
+    and fecha_hasta.year == fecha_maxima.year
+    and fecha_hasta.month == fecha_maxima.month
+)
+if periodo == "Mes en curso" or cliente_en_mes_actual:
     cliente_comparacion_desde = mes_anterior_desde
     cliente_comparacion_hasta = mes_anterior_hasta
     cliente_comparacion_label = "Mes anterior"
