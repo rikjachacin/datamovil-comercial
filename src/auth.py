@@ -24,6 +24,74 @@ LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCK_SECONDS = 15 * 60
 _RUNTIME_SESSION_SECRET = secrets.token_urlsafe(48)
 _LOGIN_ATTEMPTS: dict[str, tuple[int, float]] = {}
+DEFAULT_USERS: dict[str, dict[str, object]] = {
+    "admin": {
+        "password_hash": "pbkdf2_sha256$260000$5k49m-957VqcPd8PSEmSQGBhECY9fNVp$01zKMEbfw8i9lwy1emnJGXeOOyPIz_o7gVMkCCB2Bx4",
+        "name": "Administrador",
+        "role": "admin",
+        "zones": ["*"],
+    },
+    "david": {
+        "password_hash": "pbkdf2_sha256$260000$tzMNuaHMAtyrZA2fuRLJUZLXoPypJxN2$DosWO2L452e0tknIXA1aEcwZMRz_cGMSfMi-qfhR3YA",
+        "name": "David",
+        "role": "seller",
+        "zones": ["DAVID"],
+    },
+    "carina": {
+        "password_hash": "pbkdf2_sha256$260000$6UrL5vP2JspLeLVseMlW9vy9VNhfZIDe$fQTkYkxJY1yFHBLSDuYF5RNWh4IREhLzDlWmDxYsh1c",
+        "name": "Carina",
+        "role": "seller",
+        "zones": ["CARINA"],
+    },
+    "noelia": {
+        "password_hash": "pbkdf2_sha256$260000$WElv3TJhMfOZ6ZJ7GtlmjKImkMS0vJkN$BZ0Igeaqe4R8_zKTA3oVIKZKmy69fcFzLfzSrjuUaOs",
+        "name": "Noelia",
+        "role": "seller",
+        "zones": ["NOELIA"],
+    },
+    "javier": {
+        "password_hash": "pbkdf2_sha256$260000$IB9w79Zdqa71w5NeoIvN3VnjyUZyhT5a$BRz9zhrn5VEB3fwpRkvJB91LN9pkpOla7DTqt7Mve34",
+        "name": "Javier Molaro",
+        "role": "seller",
+        "zones": ["ZONA 13 JAVIER MOLARO"],
+    },
+    "bravo": {
+        "password_hash": "pbkdf2_sha256$260000$IVHXEM4y1cRHxLdy0nN81mP0NUyR-s1X$xv18uHdq1pv09NOKT9lMhIRSPfdjLvMYPl-aFJQu8Xc",
+        "name": "Bravo",
+        "role": "seller",
+        "zones": ["BRAVO"],
+    },
+    "francisco": {
+        "password_hash": "pbkdf2_sha256$260000$CH_cUJhPbVHAXsxmHVJpVg8tLPoi0vae$dSjtU3szLswQcfwJe-mu_1xsRANYGe4WbjJQRGgEqxY",
+        "name": "Francisco",
+        "role": "seller",
+        "zones": ["FRANCISCO"],
+    },
+    "micaela": {
+        "password_hash": "pbkdf2_sha256$260000$anJt7s-tDr4IIb0yA5mL6pc9apwM1f5P$ukx0fD2Iqa1MJ7qk-2HC9pSgttFdry0NMBn5-LzOzOc",
+        "name": "Micaela Gonzalez",
+        "role": "seller",
+        "zones": ["MICAELA GONZALEZ"],
+    },
+    "maca": {
+        "password_hash": "pbkdf2_sha256$260000$DAqRZHbZZ3CxhEtmw8lzGDLdyCiY9hyc$lLyhhDcHa4xwqwWWxp40ziaIDxfdwlPUDIzQh-vK_XU",
+        "name": "Maca Protto",
+        "role": "seller",
+        "zones": ["MACA PROTTO"],
+    },
+    "jonatan": {
+        "password_hash": "pbkdf2_sha256$260000$f3TvCQ1vCcvC_biP_C090N7W4Ni_6UkO$bRz9QRa9BWnsE0DQtlWWc_A7ZQesSXLTtF5uDoMUbn0",
+        "name": "Jonatan Mercao",
+        "role": "seller",
+        "zones": ["JONATAN MERCAO"],
+    },
+    "juan": {
+        "password_hash": "pbkdf2_sha256$260000$C_1LYmJVMZyJXW54WF6p8SbQ1vNe2a_I$2URPpn5mOvBNBT47ECRlI-AERKAL8NpZSSVW1wdeBjk",
+        "name": "Juan C. Manzelli",
+        "role": "seller",
+        "zones": ["JUAN C. MANZELLI"],
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -39,17 +107,20 @@ class User:
 
 
 def load_users(path: Path = USERS_PATH) -> dict[str, dict[str, object]]:
+    users = {key: dict(value) for key, value in DEFAULT_USERS.items()}
     try:
         if "users" in st.secrets:
-            return {key.lower(): dict(value) for key, value in st.secrets["users"].items()}
+            users.update({key.lower(): dict(value) for key, value in st.secrets["users"].items()})
+            return users
     except StreamlitSecretNotFoundError:
         pass
 
     if not path.exists():
-        raise RuntimeError(f"No se encontro el archivo de usuarios: {path}")
+        return users
     with path.open("rb") as file:
         data = tomllib.load(file)
-    return data.get("users", {})
+    users.update({key.lower(): dict(value) for key, value in data.get("users", {}).items()})
+    return users
 
 
 def password_hash(password: str, salt: str | None = None) -> str:
