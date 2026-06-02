@@ -107,19 +107,19 @@ class User:
 
 
 def load_users(path: Path = USERS_PATH) -> dict[str, dict[str, object]]:
-    users = {key: dict(value) for key, value in DEFAULT_USERS.items()}
+    users: dict[str, dict[str, object]] = {}
     try:
         if "users" in st.secrets:
             users.update({key.lower(): dict(value) for key, value in st.secrets["users"].items()})
-            return users
     except StreamlitSecretNotFoundError:
         pass
 
-    if not path.exists():
-        return users
-    with path.open("rb") as file:
-        data = tomllib.load(file)
-    users.update({key.lower(): dict(value) for key, value in data.get("users", {}).items()})
+    if path.exists():
+        with path.open("rb") as file:
+            data = tomllib.load(file)
+        users.update({key.lower(): dict(value) for key, value in data.get("users", {}).items()})
+
+    users.update({key: dict(value) for key, value in DEFAULT_USERS.items()})
     return users
 
 
