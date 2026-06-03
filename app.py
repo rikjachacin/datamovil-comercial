@@ -13,6 +13,7 @@ import streamlit.components.v1 as components
 
 from src import auth
 from src import objectives
+from src import persat_api
 from src import siscor_db
 
 
@@ -828,6 +829,61 @@ def seller_action_message(
     return base
 
 
+def show_persat_activity(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zonas: tuple[str, ...],
+    title: str = "Actividad Persat",
+) -> None:
+    st.markdown(
+        render_module_heading(
+            title,
+            "Visitas registradas por GPS y cruce contra ventas del periodo",
+            "activity",
+            "V",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    result = persat_api.activity(fecha_desde_sql, fecha_hasta_sql, zonas)
+    if not result.enabled:
+        st.warning(result.message)
+        return
+
+    if result.visits.empty:
+        st.info(result.message)
+        return
+
+    sold_clients = siscor_db.clientes_vendidos(fecha_desde_sql, fecha_hasta_sql, zonas)
+    summary = persat_api.summarize(result.visits, sold_clients)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Visitas", number(summary["visitas"]))
+    c2.metric("Clientes visitados", number(summary["clientes_visitados"]))
+    c3.metric("Visitados con venta", number(summary["visitados_con_venta"]))
+    c4.metric("Visitados sin venta", number(summary["visitados_sin_venta"]))
+
+    detail = result.visits.copy()
+    sold_ids = set(sold_clients.get("id_cliente", pd.Series(dtype=str)).dropna().astype(str).str.strip())
+    detail["venta_periodo"] = detail["id_cliente"].astype(str).str.strip().isin(sold_ids).map(
+        {True: "Con venta", False: "Sin venta"}
+    )
+    detail["fecha_hora"] = pd.to_datetime(detail["fecha_hora"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
+    detail["duracion_min"] = detail["duracion_min"].round(1)
+    st.dataframe(
+        detail.loc[:, ["fecha_hora", "vendedor", "cliente", "id_cliente", "duracion_min", "venta_periodo"]].head(40),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "fecha_hora": "Fecha y hora",
+            "vendedor": "Vendedor",
+            "cliente": "Cliente",
+            "id_cliente": "Codigo",
+            "duracion_min": st.column_config.NumberColumn("Minutos", format="%.1f"),
+            "venta_periodo": "Venta",
+        },
+    )
+
+
 def build_action_radar(
     performance: pd.DataFrame,
     clients: pd.DataFrame,
@@ -1467,6 +1523,8 @@ if vista_vendedor_activa:
         )
     )
 
+    show_persat_activity(desde_sql, hasta_sql, zonas_filtro, "Mis visitas Persat")
+
     st.markdown(
         render_module_heading(
             "Detalle vendedor",
@@ -1836,6 +1894,8 @@ else:
 
     i3.metric("Zonas bajo ritmo", number(insights["below_pace"]))
     st.info(str(insights["message"]))
+
+show_persat_activity(desde_sql, hasta_sql, zonas_filtro)
 
 st.divider()
 

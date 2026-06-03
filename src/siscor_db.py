@@ -650,6 +650,43 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
     )
 
 
+def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
+    if data_mode() == "snapshot":
+        df = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)
+        if df.empty:
+            return pd.DataFrame(columns=["id_cliente", "cliente", "total", "comprobantes"])
+        df["cliente"] = df["cliente"].fillna("")
+        empty_client = df["cliente"] == ""
+        df.loc[empty_client, "cliente"] = "Cliente " + df.loc[empty_client, "id_cliente"].astype(str)
+        return (
+            df.groupby(["id_cliente", "cliente"], as_index=False)
+            .agg(total=("total_firmado", "sum"), comprobantes=("id_facturacion", "count"))
+            .sort_values("total", ascending=False)
+        )
+
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT
+            CAST(f.id_cliente AS varchar(50)) AS id_cliente,
+            COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente,
+            SUM({_signed_total("f", "total")}) AS total,
+            COUNT(*) AS comprobantes
+        FROM dbo.cli_factura f
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND CAST(f.fecha AS date) BETWEEN ? AND ?
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          {zona_sql}
+        GROUP BY CAST(f.id_cliente AS varchar(50)), COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente))
+        ORDER BY total DESC;
+        """,
+        (fecha_desde, fecha_hasta, *zona_params),
+    )
+
+
 def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = (), limite: int = 15) -> pd.DataFrame:
     if data_mode() == "snapshot":
         facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[["id_facturacion", "tipo"]]
