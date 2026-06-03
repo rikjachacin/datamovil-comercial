@@ -870,14 +870,13 @@ def show_persat_activity(
     detail["fecha_hora"] = pd.to_datetime(detail["fecha_hora"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
     detail["duracion_min"] = detail["duracion_min"].round(1)
     st.dataframe(
-        detail.loc[:, ["fecha_hora", "vendedor", "cliente", "id_cliente", "duracion_min", "venta_periodo"]].head(40),
+        detail.loc[:, ["fecha_hora", "vendedor", "cliente", "duracion_min", "venta_periodo"]].head(40),
         use_container_width=True,
         hide_index=True,
         column_config={
             "fecha_hora": "Fecha y hora",
             "vendedor": "Vendedor",
             "cliente": "Cliente",
-            "id_cliente": "Codigo",
             "duracion_min": st.column_config.NumberColumn("Minutos", format="%.1f"),
             "venta_periodo": "Venta",
         },
