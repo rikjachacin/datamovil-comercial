@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import html
 from pathlib import Path
 import traceback
+from urllib.parse import urlencode
 
 import pandas as pd
 import plotly.express as px
@@ -1375,8 +1376,11 @@ with st.sidebar:
     nav_html = ['<div class="dm-sidebar-nav">']
     for key, label, css_class in nav_items:
         active_class = " active" if pantalla_activa == label else ""
+        nav_params = {param_key: param_value for param_key, param_value in st.query_params.items()}
+        nav_params["pantalla"] = key
+        nav_href = "?" + urlencode(nav_params)
         nav_html.append(
-            f'<a class="{css_class}{active_class}" href="?pantalla={key}">{html.escape(label)}</a>'
+            f'<a class="{css_class}{active_class}" href="{html.escape(nav_href)}">{html.escape(label)}</a>'
         )
     nav_html.append("</div>")
     st.markdown("".join(nav_html), unsafe_allow_html=True)
