@@ -1378,6 +1378,10 @@ with st.sidebar:
         active_class = " active" if pantalla_activa == label else ""
         nav_params = {param_key: param_value for param_key, param_value in st.query_params.items()}
         nav_params["pantalla"] = key
+        nav_params[auth.SESSION_QUERY_PARAM] = st.query_params.get(
+            auth.SESSION_QUERY_PARAM,
+            auth.create_session_token(current_user),
+        )
         nav_href = "?" + urlencode(nav_params)
         nav_html.append(
             f'<a class="{css_class}{active_class}" href="{html.escape(nav_href)}">{html.escape(label)}</a>'
