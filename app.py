@@ -12,6 +12,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from src import auth
+from src import anura_api
 from src import objectives
 from src import persat_api
 from src import siscor_db
@@ -883,6 +884,66 @@ def show_persat_activity(
     )
 
 
+def show_anura_activity(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zonas: tuple[str, ...],
+    title: str = "Actividad Anura",
+) -> None:
+    if zonas and not any(str(zone).strip().upper() in anura_api.TELEMARKETING_ACCOUNTS for zone in zonas):
+        return
+
+    st.markdown(
+        render_module_heading(
+            title,
+            "Llamadas de telemarketing y cruce contra ventas del periodo",
+            "calls",
+            "T",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    result = anura_api.calls(fecha_desde_sql, fecha_hasta_sql, zonas)
+    if not result.enabled:
+        st.warning(result.message)
+        return
+
+    if result.calls.empty:
+        st.info(result.message)
+        return
+
+    sold_clients = siscor_db.clientes_vendidos(fecha_desde_sql, fecha_hasta_sql, zonas)
+    summary, detail = anura_api.summarize(result.calls, sold_clients)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Llamadas", number(summary["llamadas"]))
+    c2.metric("Contestadas", number(summary["contestadas"]))
+    c3.metric("No efectivas", number(summary["no_efectivas"]))
+    c4.metric("Minutos hablados", number(round(summary["minutos_hablados"], 1)))
+
+    c5, c6 = st.columns(2)
+    c5.metric("Clientes llamados", number(summary["clientes_llamados"]))
+    c6.metric("Llamados con venta", number(summary["llamados_con_venta"]))
+
+    table = detail.copy()
+    table["fecha_hora"] = pd.to_datetime(table["fecha_hora"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
+    table["duracion_min"] = (pd.to_numeric(table["duracion_seg"], errors="coerce").fillna(0) / 60).round(1)
+    st.dataframe(
+        table.loc[:, ["fecha_hora", "telemarketer", "cliente", "telefono", "estado", "duracion_min", "venta_periodo"]]
+        .head(50),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "fecha_hora": "Fecha y hora",
+            "telemarketer": "Telemarketer",
+            "cliente": "Cliente / destino",
+            "telefono": "Telefono",
+            "estado": "Estado",
+            "duracion_min": st.column_config.NumberColumn("Minutos", format="%.1f"),
+            "venta_periodo": "Venta",
+        },
+    )
+
+
 def build_action_radar(
     performance: pd.DataFrame,
     clients: pd.DataFrame,
@@ -1523,6 +1584,7 @@ if vista_vendedor_activa:
     )
 
     show_persat_activity(desde_sql, hasta_sql, zonas_filtro, "Mis visitas Persat")
+    show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Mis llamadas Anura")
 
     st.markdown(
         render_module_heading(
@@ -1895,6 +1957,7 @@ else:
     st.info(str(insights["message"]))
 
 show_persat_activity(desde_sql, hasta_sql, zonas_filtro)
+show_anura_activity(desde_sql, hasta_sql, zonas_filtro)
 
 st.divider()
 
