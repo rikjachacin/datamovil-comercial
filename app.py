@@ -890,9 +890,6 @@ def show_anura_activity(
     zonas: tuple[str, ...],
     title: str = "Actividad Anura",
 ) -> None:
-    if zonas and not any(str(zone).strip().upper() in anura_api.TELEMARKETING_ACCOUNTS for zone in zonas):
-        return
-
     st.markdown(
         render_module_heading(
             title,
@@ -902,6 +899,10 @@ def show_anura_activity(
         ),
         unsafe_allow_html=True,
     )
+
+    if zonas and not any(str(zone).strip().upper() in anura_api.TELEMARKETING_ACCOUNTS for zone in zonas):
+        st.info("Anura aplica a zonas de telemarketing: David, Noelia, Micaela y Maca Protto.")
+        return
 
     result = anura_api.calls(fecha_desde_sql, fecha_hasta_sql, zonas)
     if not result.enabled:
@@ -1260,8 +1261,6 @@ with st.sidebar:
         cfg = siscor_db.get_config()
         st.caption(f"{cfg.database} en {cfg.server}")
 
-        if st.button("Probar conexion", use_container_width=True):
-            st.dataframe(siscor_db.ping(), use_container_width=True, hide_index=True)
         if st.button("Actualizar datos", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
@@ -1311,6 +1310,18 @@ if zonas_objetivo:
     zonas_df = zonas_df[zonas_df["zona"].isin(zonas_objetivo)].copy()
 
 with st.sidebar:
+    st.subheader("Pantallas")
+    if "pantalla_activa" not in st.session_state:
+        st.session_state["pantalla_activa"] = "Panel comercial"
+    if st.button("Panel comercial", use_container_width=True):
+        st.session_state["pantalla_activa"] = "Panel comercial"
+    if st.button("Historial Persat", use_container_width=True):
+        st.session_state["pantalla_activa"] = "Historial Persat"
+    if st.button("Historial Anura", use_container_width=True):
+        st.session_state["pantalla_activa"] = "Historial Anura"
+    pantalla_activa = st.session_state["pantalla_activa"]
+
+    st.divider()
     st.subheader("Segmentadores")
     vista_vendedor_activa = not current_user.is_admin
     if current_user.is_admin:
@@ -1393,6 +1404,15 @@ if fecha_desde > fecha_hasta:
 
 desde_sql = fecha_desde.isoformat()
 hasta_sql = fecha_hasta.isoformat()
+
+if pantalla_activa == "Historial Persat":
+    show_persat_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Persat")
+    st.stop()
+
+if pantalla_activa == "Historial Anura":
+    show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
+    st.stop()
+
 periodo_dias = (fecha_hasta - fecha_desde).days + 1
 comparacion_hasta = fecha_desde - timedelta(days=1)
 comparacion_desde = comparacion_hasta - timedelta(days=periodo_dias - 1)
@@ -1582,9 +1602,6 @@ if vista_vendedor_activa:
             top_clientes_vendedor,
         )
     )
-
-    show_persat_activity(desde_sql, hasta_sql, zonas_filtro, "Mis visitas Persat")
-    show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Mis llamadas Anura")
 
     st.markdown(
         render_module_heading(
@@ -1955,9 +1972,6 @@ else:
 
     i3.metric("Zonas bajo ritmo", number(insights["below_pace"]))
     st.info(str(insights["message"]))
-
-show_persat_activity(desde_sql, hasta_sql, zonas_filtro)
-show_anura_activity(desde_sql, hasta_sql, zonas_filtro)
 
 st.divider()
 
