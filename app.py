@@ -5,7 +5,6 @@ from datetime import date, timedelta
 import html
 from pathlib import Path
 import traceback
-from urllib.parse import urlencode
 
 import pandas as pd
 import plotly.express as px
@@ -364,55 +363,6 @@ st.markdown(
         color: var(--dm-accent);
         box-shadow: 0 8px 18px rgba(15, 123, 108, 0.14);
         transform: translateY(-1px);
-    }
-
-    .dm-sidebar-nav {
-        display: grid;
-        gap: 8px;
-        margin: 4px 0 2px;
-    }
-
-    .dm-sidebar-nav a {
-        display: block;
-        width: 100%;
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid var(--nav-border);
-        background: linear-gradient(180deg, var(--nav-bg) 0%, var(--nav-bg-2) 100%);
-        color: #182536;
-        font-weight: 750;
-        text-decoration: none;
-        box-shadow: 0 6px 16px rgba(20, 36, 58, 0.06);
-    }
-
-    .dm-sidebar-nav a:hover {
-        color: #182536;
-        text-decoration: none;
-        transform: translateY(-1px);
-        box-shadow: 0 9px 20px rgba(20, 36, 58, 0.10);
-    }
-
-    .dm-sidebar-nav a.active {
-        border-width: 2px;
-        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.65), 0 9px 20px rgba(20, 36, 58, 0.10);
-    }
-
-    .dm-nav-panel {
-        --nav-bg: #fff8cf;
-        --nav-bg-2: #ffef8f;
-        --nav-border: #e3c23a;
-    }
-
-    .dm-nav-persat {
-        --nav-bg: #fff0dd;
-        --nav-bg-2: #ffc680;
-        --nav-border: #f28c28;
-    }
-
-    .dm-nav-anura {
-        --nav-bg: #e9f9ee;
-        --nav-bg-2: #a9e8bb;
-        --nav-border: #22a35a;
     }
 
     [data-baseweb="input"],
@@ -1361,33 +1311,15 @@ if zonas_objetivo:
 
 with st.sidebar:
     st.subheader("Pantallas")
-    pantalla_param = str(st.query_params.get("pantalla", "panel")).lower()
-    pantalla_map = {
-        "panel": "Panel comercial",
-        "persat": "Historial Persat",
-        "anura": "Historial Anura",
-    }
-    pantalla_activa = pantalla_map.get(pantalla_param, "Panel comercial")
-    nav_items = [
-        ("panel", "Panel comercial", "dm-nav-panel"),
-        ("persat", "Historial Persat", "dm-nav-persat"),
-        ("anura", "Historial Anura", "dm-nav-anura"),
-    ]
-    nav_html = ['<div class="dm-sidebar-nav">']
-    for key, label, css_class in nav_items:
-        active_class = " active" if pantalla_activa == label else ""
-        nav_params = {param_key: param_value for param_key, param_value in st.query_params.items()}
-        nav_params["pantalla"] = key
-        nav_params[auth.SESSION_QUERY_PARAM] = st.query_params.get(
-            auth.SESSION_QUERY_PARAM,
-            auth.create_session_token(current_user),
-        )
-        nav_href = "?" + urlencode(nav_params)
-        nav_html.append(
-            f'<a class="{css_class}{active_class}" href="{html.escape(nav_href)}">{html.escape(label)}</a>'
-        )
-    nav_html.append("</div>")
-    st.markdown("".join(nav_html), unsafe_allow_html=True)
+    if "pantalla_activa" not in st.session_state:
+        st.session_state["pantalla_activa"] = "Panel comercial"
+    if st.button("Panel comercial", use_container_width=True):
+        st.session_state["pantalla_activa"] = "Panel comercial"
+    if st.button("Historial Persat", use_container_width=True):
+        st.session_state["pantalla_activa"] = "Historial Persat"
+    if st.button("Historial Anura", use_container_width=True):
+        st.session_state["pantalla_activa"] = "Historial Anura"
+    pantalla_activa = st.session_state["pantalla_activa"]
 
     st.divider()
     st.subheader("Segmentadores")
