@@ -365,6 +365,22 @@ st.markdown(
         transform: translateY(-1px);
     }
 
+    [data-testid="stSidebar"] .stButton button {
+        justify-content: flex-start;
+        border: 1px solid #d9e2ee;
+        border-left: 4px solid rgba(217, 181, 31, 0.75);
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: 0 4px 14px rgba(20, 36, 58, 0.05);
+    }
+
+    [data-testid="stSidebar"] .stButton button:hover {
+        border-color: #c7d5e5;
+        border-left-color: var(--dm-accent);
+        background: #ffffff;
+        box-shadow: 0 8px 18px rgba(20, 36, 58, 0.08);
+        color: var(--dm-text);
+    }
+
     [data-baseweb="input"],
     [data-baseweb="select"],
     [data-baseweb="popover"] {
