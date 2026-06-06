@@ -25,6 +25,11 @@ except ImportError:
 API_BASE_URL = "https://api.persat.com.ar/v1"
 ENCRYPTED_KEY_PATH = Path("data/persat_api_key.enc")
 REQUEST_TIMEOUT_SECONDS = 20
+EXCLUDED_CLIENT_NAMES = {
+    "PERICH VIRGINIA FANNY",
+    "BRAVO JORGE",
+    "DOMICILIO CARINA",
+}
 
 ZONE_DEVICE_MAP: dict[str, tuple[int, ...]] = {
     "BRAVO": (3,),
@@ -118,6 +123,10 @@ def _month_keys(fecha_desde: str, fecha_hasta: str) -> list[str]:
     return [str(value) for value in pd.period_range(start, end, freq="M")]
 
 
+def _clean_client_name(value: object) -> str:
+    return " ".join(str(value or "").strip().upper().split())
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _device_month_visits(device_id: int, month_key: str) -> pd.DataFrame:
     data = _request_json(f"devices-visits/{month_key}/{device_id}").get("data", [])
@@ -141,6 +150,7 @@ def _device_month_visits(device_id: int, month_key: str) -> pd.DataFrame:
     )
     df["fecha"] = df["fecha_hora"].dt.date
     df["duracion_min"] = pd.to_numeric(df["duracion_ms"], errors="coerce").fillna(0) / 60000
+    df = df[~df["cliente"].map(_clean_client_name).isin(EXCLUDED_CLIENT_NAMES)].copy()
     return df
 
 
