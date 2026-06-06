@@ -1313,11 +1313,11 @@ with st.sidebar:
     st.subheader("Pantallas")
     if "pantalla_activa" not in st.session_state:
         st.session_state["pantalla_activa"] = "Panel comercial"
-    if st.button("Panel comercial", use_container_width=True):
+    if st.button("🟡 Panel comercial", use_container_width=True):
         st.session_state["pantalla_activa"] = "Panel comercial"
-    if st.button("Historial Persat", use_container_width=True):
+    if st.button("🟠 Historial Persat", use_container_width=True):
         st.session_state["pantalla_activa"] = "Historial Persat"
-    if st.button("Historial Anura", use_container_width=True):
+    if st.button("🟢 Historial Anura", use_container_width=True):
         st.session_state["pantalla_activa"] = "Historial Anura"
     pantalla_activa = st.session_state["pantalla_activa"]
 
