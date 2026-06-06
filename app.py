@@ -381,6 +381,24 @@ st.markdown(
         color: var(--dm-text);
     }
 
+    [data-testid="stSidebar"] .st-key-dm_nav_persat .stButton button {
+        border-left-color: #f28c28;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_persat .stButton button:hover {
+        border-left-color: #f28c28;
+        color: #9a4f05;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_anura .stButton button {
+        border-left-color: #1f9d55;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_anura .stButton button:hover {
+        border-left-color: #1f9d55;
+        color: #116237;
+    }
+
     [data-baseweb="input"],
     [data-baseweb="select"],
     [data-baseweb="popover"] {
@@ -1329,12 +1347,15 @@ with st.sidebar:
     st.subheader("Pantallas")
     if "pantalla_activa" not in st.session_state:
         st.session_state["pantalla_activa"] = "Panel comercial"
-    if st.button("Panel comercial", use_container_width=True):
-        st.session_state["pantalla_activa"] = "Panel comercial"
-    if st.button("Historial Persat", use_container_width=True):
-        st.session_state["pantalla_activa"] = "Historial Persat"
-    if st.button("Historial Anura", use_container_width=True):
-        st.session_state["pantalla_activa"] = "Historial Anura"
+    with st.container(key="dm_nav_panel"):
+        if st.button("Panel comercial", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Panel comercial"
+    with st.container(key="dm_nav_persat"):
+        if st.button("Historial Persat", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Historial Persat"
+    with st.container(key="dm_nav_anura"):
+        if st.button("Historial Anura", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Historial Anura"
     pantalla_activa = st.session_state["pantalla_activa"]
 
     st.divider()
