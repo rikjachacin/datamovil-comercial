@@ -9,6 +9,7 @@ cloudflared*.log
 data/*.csv
 data/*.parquet
 data/*.key
+data/comisiones/*.xlsx
 *.ovpn
 *.key
 *.crt

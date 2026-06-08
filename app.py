@@ -13,6 +13,7 @@ import streamlit.components.v1 as components
 
 from src import auth
 from src import anura_api
+from src import commissions
 from src import objectives
 from src import persat_api
 from src import siscor_db
@@ -979,6 +980,57 @@ def show_anura_activity(
     )
 
 
+def show_commissions(current_user: auth.User) -> None:
+    st.markdown(
+        render_module_heading(
+            "Comisiones",
+            "Ventas acumuladas calculadas desde el ultimo archivo cargado",
+            "sales",
+            "$",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    if not commissions.user_can_view(current_user.username, current_user.is_admin):
+        st.warning("Tu usuario no tiene habilitado este modulo.")
+        return
+
+    result = commissions.load_latest()
+    if not result.enabled:
+        st.info(result.message)
+        return
+
+    data = result.data.copy()
+    if current_user.is_admin:
+        visible_vendors = set(commissions.USER_VENDOR_MAP.values())
+        data = data[data["vendedor"].isin(visible_vendors)].copy()
+        total = data["ventas_acumuladas"].sum() if not data.empty else 0
+        st.metric("Ventas acumuladas", money(total))
+        st.caption(f"Archivo: {result.source_name}")
+        if not data.empty:
+            table = data.sort_values("vendedor").copy()
+            st.dataframe(
+                table.loc[:, ["vendedor", "ventas_acumuladas", "comision_cobranza", "comision_ventas"]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "vendedor": "Vendedor",
+                    "ventas_acumuladas": st.column_config.NumberColumn("Ventas acumuladas", format="$ %.0f"),
+                    "comision_cobranza": st.column_config.NumberColumn("Comision cobranza", format="$ %.0f"),
+                    "comision_ventas": st.column_config.NumberColumn("Comision ventas", format="$ %.0f"),
+                },
+            )
+        return
+
+    vendor = commissions.vendor_for_user(current_user.username)
+    user_data = data[data["vendedor"].astype(str).str.strip().eq(str(vendor or "").strip())]
+    total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
+    st.metric("Ventas acumuladas", money(total))
+    st.caption(f"Archivo: {result.source_name}")
+    if user_data.empty:
+        st.info("Sin comisiones registradas en el archivo cargado.")
+
+
 def build_action_radar(
     performance: pd.DataFrame,
     clients: pd.DataFrame,
@@ -1356,6 +1408,10 @@ with st.sidebar:
     with st.container(key="dm_nav_anura"):
         if st.button("Historial Anura", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Anura"
+    if commissions.user_can_view(current_user.username, current_user.is_admin):
+        with st.container(key="dm_nav_commissions"):
+            if st.button("Comisiones", use_container_width=True):
+                st.session_state["pantalla_activa"] = "Comisiones"
     pantalla_activa = st.session_state["pantalla_activa"]
 
     st.divider()
@@ -1448,6 +1504,10 @@ if pantalla_activa == "Historial Persat":
 
 if pantalla_activa == "Historial Anura":
     show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
+    st.stop()
+
+if pantalla_activa == "Comisiones":
+    show_commissions(current_user)
     st.stop()
 
 periodo_dias = (fecha_hasta - fecha_desde).days + 1
