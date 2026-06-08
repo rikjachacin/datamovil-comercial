@@ -984,7 +984,7 @@ def show_commissions(current_user: auth.User) -> None:
     st.markdown(
         render_module_heading(
             "Comisiones",
-            "Ventas acumuladas calculadas desde el ultimo archivo cargado",
+            "Comision acumulada calculada desde el ultimo archivo cargado",
             "sales",
             "$",
         ),
@@ -1006,7 +1006,7 @@ def show_commissions(current_user: auth.User) -> None:
         selected_vendor = st.selectbox("Vendedor", vendor_options)
         user_data = data[data["vendedor"].astype(str).str.strip().eq(selected_vendor)]
         total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
-        st.metric("Ventas acumuladas", money(total))
+        st.metric("Comision Acumulada", money(total))
         st.caption(f"Archivo: {result.source_name}")
         if user_data.empty:
             st.info("Sin comisiones registradas en el archivo cargado.")
@@ -1015,7 +1015,7 @@ def show_commissions(current_user: auth.User) -> None:
     vendor = commissions.vendor_for_user(current_user.username)
     user_data = data[data["vendedor"].astype(str).str.strip().eq(str(vendor or "").strip())]
     total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
-    st.metric("Ventas acumuladas", money(total))
+    st.metric("Comision Acumulada", money(total))
     st.caption(f"Archivo: {result.source_name}")
     if user_data.empty:
         st.info("Sin comisiones registradas en el archivo cargado.")
