@@ -1002,24 +1002,14 @@ def show_commissions(current_user: auth.User) -> None:
 
     data = result.data.copy()
     if current_user.is_admin:
-        visible_vendors = set(commissions.USER_VENDOR_MAP.values())
-        data = data[data["vendedor"].isin(visible_vendors)].copy()
-        total = data["ventas_acumuladas"].sum() if not data.empty else 0
+        vendor_options = sorted(set(commissions.USER_VENDOR_MAP.values()))
+        selected_vendor = st.selectbox("Vendedor", vendor_options)
+        user_data = data[data["vendedor"].astype(str).str.strip().eq(selected_vendor)]
+        total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
         st.metric("Ventas acumuladas", money(total))
         st.caption(f"Archivo: {result.source_name}")
-        if not data.empty:
-            table = data.sort_values("vendedor").copy()
-            st.dataframe(
-                table.loc[:, ["vendedor", "ventas_acumuladas", "comision_cobranza", "comision_ventas"]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "vendedor": "Vendedor",
-                    "ventas_acumuladas": st.column_config.NumberColumn("Ventas acumuladas", format="$ %.0f"),
-                    "comision_cobranza": st.column_config.NumberColumn("Comision cobranza", format="$ %.0f"),
-                    "comision_ventas": st.column_config.NumberColumn("Comision ventas", format="$ %.0f"),
-                },
-            )
+        if user_data.empty:
+            st.info("Sin comisiones registradas en el archivo cargado.")
         return
 
     vendor = commissions.vendor_for_user(current_user.username)
