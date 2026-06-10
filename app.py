@@ -732,6 +732,76 @@ def progress_bar_html(value: object) -> str:
     )
 
 
+def goal_ranking_figure(performance: pd.DataFrame, current_zone: str | None = None):
+    scoped = performance.copy()
+    if scoped.empty or "tiene_objetivo" not in scoped.columns:
+        return None
+    scoped = scoped[scoped["tiene_objetivo"]].copy()
+    if scoped.empty:
+        return None
+
+    scoped["cumplimiento_pct"] = scoped["cumplimiento"].map(numeric_value) * 100
+    scoped["ranking"] = scoped["cumplimiento_pct"].rank(method="min", ascending=False).astype(int)
+    scoped["zona_label"] = scoped.apply(
+        lambda row: f"#{row['ranking']} {row['zona']}",
+        axis=1,
+    )
+    scoped["estado_ranking"] = scoped["cumplimiento_pct"].map(
+        lambda value: "Cumplido" if value >= 100 else "En zona saludable" if value >= 80 else "A empujar"
+    )
+    if current_zone:
+        current_zone_normalized = str(current_zone).strip().upper()
+        scoped.loc[
+            scoped["zona"].astype(str).str.strip().str.upper() == current_zone_normalized,
+            "estado_ranking",
+        ] = "Mi zona"
+
+    scoped = scoped.sort_values(["cumplimiento_pct", "ventas_mes"], ascending=[True, True])
+    scoped["texto"] = scoped["cumplimiento_pct"].map(
+        lambda value: f"{value:,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
+    )
+
+    fig = px.bar(
+        scoped,
+        x="cumplimiento_pct",
+        y="zona_label",
+        orientation="h",
+        text="texto",
+        color="estado_ranking",
+        color_discrete_map={
+            "Cumplido": "#16a34a",
+            "En zona saludable": "#d9b51f",
+            "A empujar": "#ef4444",
+            "Mi zona": "#8d168f",
+        },
+        hover_data={
+            "zona_label": False,
+            "cumplimiento_pct": ":.1f",
+            "estado_ranking": True,
+        },
+    )
+    max_pct = max(float(scoped["cumplimiento_pct"].max()), 100)
+    fig.add_vline(
+        x=100,
+        line_dash="dash",
+        line_color="#0f7b6c",
+        annotation_text="Objetivo",
+        annotation_position="top right",
+    )
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_layout(
+        height=max(360, 42 * len(scoped) + 130),
+        xaxis_title="% del objetivo mensual",
+        yaxis_title="",
+        legend_title="",
+        margin=dict(l=10, r=35, t=20, b=20),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(range=[0, max_pct * 1.18], ticksuffix="%"),
+    )
+    return fig
+
+
 def render_ranking_table(df: pd.DataFrame) -> str:
     headers = [
         "Zona",
@@ -1554,9 +1624,25 @@ if vista_vendedor_activa:
     )
     if objetivos_df.empty:
         desempeno_vendedor = pd.DataFrame()
+        ranking_equipo_vendedor = pd.DataFrame()
     else:
         desempeno_vendedor = objectives.monthly_performance(
             ventas_mes_vendedor,
+            objetivos_df,
+            mes_objetivo,
+            avance_mes,
+            dias_restantes,
+        )
+        zonas_ranking_vendedor = zonas_objetivo or tuple(
+            objetivos_df.loc[objetivos_df["mes"] == mes_objetivo, "zona"].dropna().astype(str)
+        )
+        ventas_ranking_vendedor = siscor_db.ventas_por_zona(
+            mes_actual_desde.isoformat(),
+            fecha_maxima.isoformat(),
+            zonas_ranking_vendedor,
+        )
+        ranking_equipo_vendedor = objectives.monthly_performance(
+            ventas_ranking_vendedor,
             objetivos_df,
             mes_objetivo,
             avance_mes,
@@ -1670,6 +1756,22 @@ if vista_vendedor_activa:
             st.caption(
                 "La meta a la fecha es proporcional a los dias comerciales seleccionados; el objetivo mensual no cambia."
             )
+
+    ranking_current_zone = str(vendedor_row["zona"]) if vendedor_row is not None else (
+        zonas_filtro[0] if len(zonas_filtro) == 1 else None
+    )
+    ranking_fig = goal_ranking_figure(ranking_equipo_vendedor, ranking_current_zone)
+    if ranking_fig is not None:
+        st.markdown(
+            render_module_heading(
+                "Ranking del equipo",
+                "Posicion por cumplimiento del objetivo mensual",
+                "ranking",
+                "#",
+            ),
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(ranking_fig, use_container_width=True)
 
     st.markdown(
         render_module_heading(
@@ -2059,6 +2161,11 @@ else:
 
     i3.metric("Zonas bajo ritmo", number(insights["below_pace"]))
     st.info(str(insights["message"]))
+
+    ranking_fig = goal_ranking_figure(desempeno_con_objetivo)
+    if ranking_fig is not None:
+        st.markdown("#### Ranking por cumplimiento de objetivo")
+        st.plotly_chart(ranking_fig, use_container_width=True)
 
 st.divider()
 
