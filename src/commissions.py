@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import io
 from pathlib import Path
+import re
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -174,7 +175,14 @@ def _latest_file() -> Path | None:
     files = [*COMMISSIONS_DIR.glob("*.xlsx.enc"), *COMMISSIONS_DIR.glob("*.xlsx")]
     if not files:
         return None
-    return max(files, key=lambda path: path.stat().st_mtime)
+    return max(files, key=_commission_file_sort_key)
+
+
+def _commission_file_sort_key(path: Path) -> tuple[str, float]:
+    match = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{8}_\d{6})", path.name)
+    if match:
+        return (match.group(1) + "_" + match.group(2), path.stat().st_mtime)
+    return ("", path.stat().st_mtime)
 
 
 def load_latest() -> CommissionResult:
