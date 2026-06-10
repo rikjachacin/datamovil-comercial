@@ -2171,6 +2171,7 @@ total_proyeccion = 0.0
 venta_diaria_necesaria = 0.0
 cumplimiento_total = 0.0
 ritmo_total = 0.0
+ticket_promedio_equipo = 0.0
 insights = {
     "leader": None,
     "risk": None,
@@ -2210,6 +2211,10 @@ else:
     venta_diaria_necesaria = desempeno_con_objetivo["venta_diaria_necesaria"].sum()
     cumplimiento_total = total_ventas_mes / total_objetivo if total_objetivo else 0
     ritmo_total = total_ventas_mes / total_objetivo_esperado if total_objetivo_esperado else 0
+    total_comprobantes_equipo = desempeno_con_objetivo["comprobantes"].sum()
+    ticket_promedio_equipo = (
+        total_ventas_mes / total_comprobantes_equipo if total_comprobantes_equipo else 0
+    )
     zonas_en_ritmo = int((desempeno_con_objetivo["ritmo"] >= 1).sum())
 
     c1, c2, c3, c4 = st.columns(4)
@@ -2227,7 +2232,7 @@ else:
     p2.metric(label_brecha, money(total_proyeccion - total_objetivo))
     p3.metric(label_diario, money(venta_diaria_necesaria))
     if periodo == "Mes en curso":
-        p4.metric(label_dias, workdays(dias_display_objetivo))
+        p4.metric("Ticket promedio equipo", money(ticket_promedio_equipo))
     else:
         p4.metric("Objetivo mensual", money(total_objetivo))
 
