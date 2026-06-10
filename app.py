@@ -613,6 +613,98 @@ st.markdown(
         margin-top: 2px;
     }
 
+    .dm-ranking-list {
+        display: grid;
+        gap: 10px;
+        margin: 10px 0 18px;
+    }
+
+    .dm-ranking-row {
+        background: var(--dm-panel);
+        border: 1px solid var(--dm-border);
+        border-left: 5px solid var(--rank-color, var(--dm-accent));
+        border-radius: 8px;
+        padding: 12px 14px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.05);
+    }
+
+    .dm-ranking-row.current {
+        background: #f4efff;
+        border-color: #c4b5fd;
+        box-shadow: 0 10px 26px rgba(141, 22, 143, 0.14);
+    }
+
+    .dm-ranking-main {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+
+    .dm-rank-badge {
+        min-width: 42px;
+        height: 34px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--rank-color, var(--dm-accent));
+        color: #fff;
+        font-weight: 850;
+        font-size: 15px;
+    }
+
+    .dm-rank-zone {
+        min-width: 0;
+        color: var(--dm-text);
+        font-weight: 850;
+        line-height: 1.15;
+        overflow-wrap: anywhere;
+    }
+
+    .dm-rank-pct {
+        color: var(--dm-text);
+        font-size: 20px;
+        font-weight: 850;
+        white-space: nowrap;
+    }
+
+    .dm-rank-track {
+        height: 12px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: #edf2f7;
+        margin-bottom: 7px;
+    }
+
+    .dm-rank-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: var(--rank-color, var(--dm-accent));
+    }
+
+    .dm-rank-note {
+        color: var(--dm-muted);
+        font-size: 13px;
+        line-height: 1.3;
+    }
+
+    @media (max-width: 720px) {
+        .dm-ranking-row {
+            padding: 11px 12px;
+        }
+
+        .dm-ranking-main {
+            grid-template-columns: auto 1fr;
+        }
+
+        .dm-rank-pct {
+            grid-column: 2;
+            font-size: 18px;
+        }
+    }
+
     div[data-testid="stPlotlyChart"],
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--dm-border);
@@ -732,74 +824,57 @@ def progress_bar_html(value: object) -> str:
     )
 
 
-def goal_ranking_figure(performance: pd.DataFrame, current_zone: str | None = None):
+def goal_ranking_html(performance: pd.DataFrame, current_zone: str | None = None) -> str:
     scoped = performance.copy()
     if scoped.empty or "tiene_objetivo" not in scoped.columns:
-        return None
+        return ""
     scoped = scoped[scoped["tiene_objetivo"]].copy()
     if scoped.empty:
-        return None
+        return ""
 
     scoped["cumplimiento_pct"] = scoped["cumplimiento"].map(numeric_value) * 100
     scoped["ranking"] = scoped["cumplimiento_pct"].rank(method="min", ascending=False).astype(int)
-    scoped["zona_label"] = scoped.apply(
-        lambda row: f"#{row['ranking']} {row['zona']}",
-        axis=1,
-    )
-    scoped["estado_ranking"] = scoped["cumplimiento_pct"].map(
-        lambda value: "Cumplido" if value >= 100 else "En zona saludable" if value >= 80 else "A empujar"
-    )
-    if current_zone:
-        current_zone_normalized = str(current_zone).strip().upper()
-        scoped.loc[
-            scoped["zona"].astype(str).str.strip().str.upper() == current_zone_normalized,
-            "estado_ranking",
-        ] = "Mi zona"
+    scoped = scoped.sort_values(["cumplimiento_pct", "ventas_mes"], ascending=[False, False])
+    current_zone_normalized = str(current_zone or "").strip().upper()
 
-    scoped = scoped.sort_values(["cumplimiento_pct", "ventas_mes"], ascending=[True, True])
-    scoped["texto"] = scoped["cumplimiento_pct"].map(
-        lambda value: f"{value:,.1f} %".replace(",", "X").replace(".", ",").replace("X", ".")
-    )
+    rows = []
+    for _, row in scoped.iterrows():
+        pct_value = numeric_value(row["cumplimiento_pct"])
+        fill_pct = min(max(pct_value, 0), 100)
+        if pct_value >= 100:
+            color = "#16a34a"
+            status = "Objetivo cumplido"
+        elif pct_value >= 80:
+            color = "#d9b51f"
+            status = "En zona saludable"
+        else:
+            color = "#ef4444"
+            status = "A empujar"
 
-    fig = px.bar(
-        scoped,
-        x="cumplimiento_pct",
-        y="zona_label",
-        orientation="h",
-        text="texto",
-        color="estado_ranking",
-        color_discrete_map={
-            "Cumplido": "#16a34a",
-            "En zona saludable": "#d9b51f",
-            "A empujar": "#ef4444",
-            "Mi zona": "#8d168f",
-        },
-        hover_data={
-            "zona_label": False,
-            "cumplimiento_pct": ":.1f",
-            "estado_ranking": True,
-        },
-    )
-    max_pct = max(float(scoped["cumplimiento_pct"].max()), 100)
-    fig.add_vline(
-        x=100,
-        line_dash="dash",
-        line_color="#0f7b6c",
-        annotation_text="Objetivo",
-        annotation_position="top right",
-    )
-    fig.update_traces(textposition="outside", cliponaxis=False)
-    fig.update_layout(
-        height=max(360, 42 * len(scoped) + 130),
-        xaxis_title="% del objetivo mensual",
-        yaxis_title="",
-        legend_title="",
-        margin=dict(l=10, r=35, t=20, b=20),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(range=[0, max_pct * 1.18], ticksuffix="%"),
-    )
-    return fig
+        is_current = (
+            current_zone_normalized
+            and str(row["zona"]).strip().upper() == current_zone_normalized
+        )
+        if is_current:
+            color = "#8d168f"
+            status = "Mi puesto"
+
+        row_class = "dm-ranking-row current" if is_current else "dm-ranking-row"
+        rows.append(
+            f'<div class="{row_class}" style="--rank-color:{color};">'
+            '<div class="dm-ranking-main">'
+            f'<div class="dm-rank-badge">#{int(row["ranking"])}</div>'
+            f'<div class="dm-rank-zone">{html.escape(str(row["zona"]))}</div>'
+            f'<div class="dm-rank-pct">{percent_points(pct_value)}</div>'
+            "</div>"
+            '<div class="dm-rank-track">'
+            f'<div class="dm-rank-fill" style="width:{fill_pct:.1f}%;"></div>'
+            "</div>"
+            f'<div class="dm-rank-note">{html.escape(status)} - cumplimiento del objetivo mensual</div>'
+            "</div>"
+        )
+
+    return '<div class="dm-ranking-list">' + "".join(rows) + "</div>"
 
 
 def render_ranking_table(df: pd.DataFrame) -> str:
@@ -1760,8 +1835,8 @@ if vista_vendedor_activa:
     ranking_current_zone = str(vendedor_row["zona"]) if vendedor_row is not None else (
         zonas_filtro[0] if len(zonas_filtro) == 1 else None
     )
-    ranking_fig = goal_ranking_figure(ranking_equipo_vendedor, ranking_current_zone)
-    if ranking_fig is not None:
+    ranking_html = goal_ranking_html(ranking_equipo_vendedor, ranking_current_zone)
+    if ranking_html:
         st.markdown(
             render_module_heading(
                 "Ranking del equipo",
@@ -1771,7 +1846,7 @@ if vista_vendedor_activa:
             ),
             unsafe_allow_html=True,
         )
-        st.plotly_chart(ranking_fig, use_container_width=True)
+        st.markdown(ranking_html, unsafe_allow_html=True)
 
     st.markdown(
         render_module_heading(
@@ -2162,10 +2237,10 @@ else:
     i3.metric("Zonas bajo ritmo", number(insights["below_pace"]))
     st.info(str(insights["message"]))
 
-    ranking_fig = goal_ranking_figure(desempeno_con_objetivo)
-    if ranking_fig is not None:
+    ranking_html = goal_ranking_html(desempeno_con_objetivo)
+    if ranking_html:
         st.markdown("#### Ranking por cumplimiento de objetivo")
-        st.plotly_chart(ranking_fig, use_container_width=True)
+        st.markdown(ranking_html, unsafe_allow_html=True)
 
 st.divider()
 
