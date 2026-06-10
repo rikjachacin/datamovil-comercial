@@ -615,67 +615,55 @@ st.markdown(
 
     .dm-ranking-list {
         display: grid;
-        gap: 10px;
-        margin: 10px 0 18px;
+        gap: 6px;
+        margin: 8px 0 14px;
+        background: var(--dm-panel);
+        border: 1px solid var(--dm-border);
+        border-radius: 8px;
+        padding: 10px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.05);
     }
 
     .dm-ranking-row {
-        background: var(--dm-panel);
-        border: 1px solid var(--dm-border);
-        border-left: 5px solid var(--rank-color, var(--dm-accent));
-        border-radius: 8px;
-        padding: 12px 14px;
-        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.05);
+        display: grid;
+        grid-template-columns: minmax(145px, 210px) 1fr 66px;
+        align-items: center;
+        gap: 8px;
+        min-height: 30px;
     }
 
     .dm-ranking-row.current {
         background: #f4efff;
-        border-color: #c4b5fd;
-        box-shadow: 0 10px 26px rgba(141, 22, 143, 0.14);
+        border-radius: 7px;
+        padding: 4px 5px;
+        margin: 0 -5px;
     }
 
-    .dm-ranking-main {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 8px;
-    }
-
-    .dm-rank-badge {
-        min-width: 42px;
-        height: 34px;
-        border-radius: 8px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--rank-color, var(--dm-accent));
-        color: #fff;
-        font-weight: 850;
-        font-size: 15px;
-    }
-
-    .dm-rank-zone {
+    .dm-rank-label {
         min-width: 0;
         color: var(--dm-text);
-        font-weight: 850;
-        line-height: 1.15;
-        overflow-wrap: anywhere;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.18;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .dm-rank-pct {
         color: var(--dm-text);
-        font-size: 20px;
+        font-size: 14px;
         font-weight: 850;
         white-space: nowrap;
+        text-align: right;
     }
 
     .dm-rank-track {
-        height: 12px;
+        position: relative;
+        height: 18px;
         border-radius: 999px;
         overflow: hidden;
         background: #edf2f7;
-        margin-bottom: 7px;
     }
 
     .dm-rank-fill {
@@ -684,24 +672,41 @@ st.markdown(
         background: var(--rank-color, var(--dm-accent));
     }
 
-    .dm-rank-note {
+    .dm-rank-marker {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: min(100%, var(--target-left, 100%));
+        border-left: 2px dashed #0f7b6c;
+    }
+
+    .dm-ranking-footnote {
         color: var(--dm-muted);
-        font-size: 13px;
-        line-height: 1.3;
+        font-size: 12px;
+        margin-top: 4px;
     }
 
     @media (max-width: 720px) {
-        .dm-ranking-row {
-            padding: 11px 12px;
+        .dm-ranking-list {
+            padding: 8px;
         }
 
-        .dm-ranking-main {
-            grid-template-columns: auto 1fr;
+        .dm-ranking-row {
+            grid-template-columns: minmax(108px, 128px) 1fr 54px;
+            gap: 6px;
+            min-height: 27px;
+        }
+
+        .dm-rank-label {
+            font-size: 12px;
         }
 
         .dm-rank-pct {
-            grid-column: 2;
-            font-size: 18px;
+            font-size: 12px;
+        }
+
+        .dm-rank-track {
+            height: 16px;
         }
     }
 
@@ -860,21 +865,26 @@ def goal_ranking_html(performance: pd.DataFrame, current_zone: str | None = None
             status = "Mi puesto"
 
         row_class = "dm-ranking-row current" if is_current else "dm-ranking-row"
+        label = f"#{int(row['ranking'])} {row['zona']}"
+        if is_current:
+            label = f"{label} - Mi puesto"
         rows.append(
             f'<div class="{row_class}" style="--rank-color:{color};">'
-            '<div class="dm-ranking-main">'
-            f'<div class="dm-rank-badge">#{int(row["ranking"])}</div>'
-            f'<div class="dm-rank-zone">{html.escape(str(row["zona"]))}</div>'
-            f'<div class="dm-rank-pct">{percent_points(pct_value)}</div>'
-            "</div>"
+            f'<div class="dm-rank-label">{html.escape(label)}</div>'
             '<div class="dm-rank-track">'
             f'<div class="dm-rank-fill" style="width:{fill_pct:.1f}%;"></div>'
+            '<div class="dm-rank-marker"></div>'
             "</div>"
-            f'<div class="dm-rank-note">{html.escape(status)} - cumplimiento del objetivo mensual</div>'
+            f'<div class="dm-rank-pct">{percent_points(pct_value)}</div>'
             "</div>"
         )
 
-    return '<div class="dm-ranking-list">' + "".join(rows) + "</div>"
+    return (
+        '<div class="dm-ranking-list">'
+        + "".join(rows)
+        + '<div class="dm-ranking-footnote">La linea punteada marca el 100% del objetivo mensual.</div>'
+        + "</div>"
+    )
 
 
 def render_ranking_table(df: pd.DataFrame) -> str:
@@ -1725,6 +1735,17 @@ if vista_vendedor_activa:
         )
 
     vendedor_row = None if desempeno_vendedor.empty else desempeno_vendedor.iloc[0]
+    ranking_equipo_con_objetivo = (
+        ranking_equipo_vendedor[ranking_equipo_vendedor["tiene_objetivo"]].copy()
+        if not ranking_equipo_vendedor.empty and "tiene_objetivo" in ranking_equipo_vendedor.columns
+        else pd.DataFrame()
+    )
+    cobertura_equipo = (
+        ranking_equipo_con_objetivo["ventas_mes"].sum()
+        / ranking_equipo_con_objetivo["objetivo"].sum()
+        if not ranking_equipo_con_objetivo.empty and ranking_equipo_con_objetivo["objetivo"].sum()
+        else 0
+    )
     clientes_vendedor = siscor_db.clientes_a_recuperar(
         desde_sql,
         hasta_sql,
@@ -1770,7 +1791,7 @@ if vista_vendedor_activa:
                         ("Objetivo", money(vendedor_row["objetivo"])),
                         ("Cumplimiento", percent(vendedor_row["cumplimiento"])),
                         ("Diario necesario", money(vendedor_row["venta_diaria_necesaria"])),
-                        ("Dias para vender", workdays(dias_restantes)),
+                        ("Cobertura equipo", percent(cobertura_equipo)),
                         ("Ritmo a la fecha", percent(vendedor_row["ritmo"])),
                         ("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"])),
                         (
