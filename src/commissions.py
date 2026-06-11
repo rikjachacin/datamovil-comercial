@@ -38,8 +38,8 @@ USER_VENDOR_MAP = {
 }
 
 AUTHORIZED_USERS = set(USER_VENDOR_MAP)
-COMMISSIONED_USERS = {"carina", "francisco", "jonatan", "juan", "juancruz", "micaela"}
-COMMISSIONED_VENDORS = {"Carina", "Francisco", "Jonatan", "Juan Cruz M.", "Micaela"}
+COMMISSIONED_USERS = {"carina", "francisco", "javier", "jonatan", "juan", "juancruz", "micaela"}
+COMMISSIONED_VENDORS = {"Carina", "Francisco", "Javier", "Jonatan", "Juan Cruz M.", "Micaela"}
 
 
 @dataclass(frozen=True)
