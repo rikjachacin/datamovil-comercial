@@ -778,7 +778,7 @@ def numeric_value(value: object) -> float:
     return 0.0 if pd.isna(numeric) else float(numeric)
 
 
-TELEMARKETING_ZONE_TOKENS = ("DAVID", "NOELIA", "MICAELA", "MACA", "MACARENA")
+TELEMARKETING_ZONE_TOKENS = ("DAVID", "NOELIA", "MICAELA", "MACA", "MACARENA", "LUCIA")
 
 
 def is_telemarketing_zone(zona: object) -> bool:
@@ -1092,7 +1092,7 @@ def show_anura_activity(
     )
 
     if zonas and not any(str(zone).strip().upper() in anura_api.TELEMARKETING_ACCOUNTS for zone in zonas):
-        st.info("Anura aplica a zonas de telemarketing: David, Noelia, Micaela y Maca Protto.")
+        st.info("Anura aplica a zonas de telemarketing: David, Noelia, Micaela, Maca Protto y Lucia Moreno.")
         return
 
     result = anura_api.calls(fecha_desde_sql, fecha_hasta_sql, zonas)

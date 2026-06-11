@@ -34,6 +34,7 @@ TELEMARKETING_ACCOUNTS: dict[str, tuple[str, ...]] = {
     "DAVID": ("101", "DAVID"),
     "NOELIA": ("103", "NOELIA"),
     "MICAELA GONZALEZ": ("104", "MICAELA"),
+    "LUCIA MORENO": ("LUCIA", "LUCIA MORENO"),
 }
 
 
