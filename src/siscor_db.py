@@ -26,6 +26,7 @@ SISCOR_CONFIG_PATH = Path(r"C:\SisCor\SisCor.exe.config")
 SNAPSHOT_DIR = Path("data")
 SAMPLE_FACTURAS_PATH = SNAPSHOT_DIR / "sample_facturas.csv"
 SAMPLE_FACTURA_ITEMS_PATH = SNAPSHOT_DIR / "sample_factura_items.csv"
+SAMPLE_PEDIDO_ITEMS_PATH = SNAPSHOT_DIR / "sample_pedido_items.csv"
 SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
 SAMPLE_CREDITOS_PATH = SNAPSHOT_DIR / "sample_creditos.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
@@ -33,8 +34,8 @@ DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 SQL_QUERY_TTL_SECONDS = 30
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
 EXCLUDED_PRODUCT_NAMES = ("DESCUENTO PAGO CDO",)
-COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND", "PC", "PD")
-NEGATIVE_COMMERCIAL_DOCUMENT_TYPES = ("NC", "PC", "PD")
+COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
+NEGATIVE_COMMERCIAL_DOCUMENT_TYPES = ("NC",)
 BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 
@@ -215,6 +216,13 @@ def _snapshot_facturas() -> pd.DataFrame:
 @st.cache_data(ttl=300, show_spinner=False)
 def _snapshot_factura_items() -> pd.DataFrame:
     return _read_snapshot_csv("factura_items.csv", SAMPLE_FACTURA_ITEMS_PATH)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _snapshot_pedido_items() -> pd.DataFrame:
+    df = _read_snapshot_csv("pedido_items.csv", SAMPLE_PEDIDO_ITEMS_PATH)
+    df["fecha"] = pd.to_datetime(df["fecha"])
+    return df
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -747,14 +755,17 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
 def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     columns = ["zona", "marca", "total"]
     if data_mode() == "snapshot":
-        facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[["id_facturacion", "tipo", "zona"]]
-        items = _snapshot_factura_items()
-        if "marca" not in items.columns:
+        df = _snapshot_pedido_items().copy()
+        if df.empty or "marca" not in df.columns:
             return pd.DataFrame(columns=columns)
-        df = items.merge(facturas, on="id_facturacion", how="inner")
-        if df.empty:
-            return pd.DataFrame(columns=columns)
-        sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
+        df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
+        df = df[~df["zona"].isin(EXCLUDED_COMMERCIAL_ZONES)]
+        df = df[df["tipo"].astype(str).str.upper().isin(("P", "PD"))]
+        df = df[df["fecha"].dt.date >= pd.to_datetime(fecha_desde).date()]
+        df = df[df["fecha"].dt.date <= pd.to_datetime(fecha_hasta).date()]
+        if zonas_filtro:
+            df = df[df["zona"].isin(zonas_filtro)]
+        sign = df["tipo"].astype(str).str.upper().map(lambda value: -1 if value == "PD" else 1)
         df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
         df["marca"] = df["marca"].fillna("").astype(str).str.strip()
         df = df[df["marca"].ne("")]
@@ -766,26 +777,22 @@ def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str
             .sort_values("total", ascending=False)
         )
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
-    product_expr = _product_name_expr("fi", "p")
+    zona_sql, zona_params = _zona_filter("p", zonas_filtro)
     return read_sql(
         f"""
         SET NOCOUNT ON;
         SELECT
-            COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
-            COALESCE(NULLIF(fi.marca, ''), 'Sin marca') AS marca,
-            SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS total
-        FROM dbo.cli_factura_item fi
-        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
-        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
-        WHERE ISNULL(f.Anulado, 0) = 0
-          {_authorized_invoice_filter("f")}
-          AND CAST(f.fecha AS date) BETWEEN ? AND ?
-          {_commercial_zone_filter("f")}
-          {_commercial_document_filter("f")}
-          {_commercial_product_filter(product_expr)}
+            COALESCE(NULLIF(p.zona, ''), 'Sin zona') AS zona,
+            COALESCE(NULLIF(pi.marca, ''), 'Sin marca') AS marca,
+            SUM(CASE WHEN p.tipo = 'PD' THEN -CAST(pi.total AS decimal(18, 2)) ELSE CAST(pi.total AS decimal(18, 2)) END) AS total
+        FROM dbo.pro_pedido p
+        INNER JOIN dbo.pro_pedido_item pi ON pi.id_pedido = p.id_pedido
+        WHERE ISNULL(p.Anulado, 0) = 0
+          AND CAST(p.fecha AS date) BETWEEN ? AND ?
+          {_commercial_zone_filter("p")}
+          AND p.tipo IN ('P', 'PD')
           {zona_sql}
-        GROUP BY COALESCE(NULLIF(f.zona, ''), 'Sin zona'), COALESCE(NULLIF(fi.marca, ''), 'Sin marca')
+        GROUP BY COALESCE(NULLIF(p.zona, ''), 'Sin zona'), COALESCE(NULLIF(pi.marca, ''), 'Sin marca')
         ORDER BY total DESC;
         """,
         (fecha_desde, fecha_hasta, *zona_params),
@@ -1566,7 +1573,7 @@ def export_facturas_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND ISNULL(autorizado, 0) = 1
           AND fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
-          AND tipo IN ('FC', 'NC', 'ND', 'PC', 'PD');
+          AND tipo IN ('FC', 'NC', 'ND');
         """,
         (months_back,),
     )
@@ -1592,7 +1599,34 @@ def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND f.fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(f.zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
           {_commercial_product_filter(product_expr)}
-          AND f.tipo IN ('FC', 'NC', 'ND', 'PC', 'PD');
+          AND f.tipo IN ('FC', 'NC', 'ND');
+        """,
+        (months_back,),
+    )
+
+
+def export_pedido_items_snapshot(months_back: int = 24) -> pd.DataFrame:
+    return read_sql(
+        """
+        SET NOCOUNT ON;
+        SELECT
+            p.id_pedido,
+            CAST(p.fecha AS datetime) AS fecha,
+            p.tipo,
+            p.numero,
+            COALESCE(NULLIF(p.cliente, ''), CONCAT('Cliente ', p.id_cliente)) AS cliente,
+            COALESCE(NULLIF(p.zona, ''), 'Sin zona') AS zona,
+            pi.id_producto,
+            COALESCE(NULLIF(pi.descripcion, ''), CONCAT('Producto ', pi.id_producto)) AS producto,
+            COALESCE(NULLIF(pi.marca, ''), '') AS marca,
+            CAST(pi.cantidad AS decimal(18, 2)) AS cantidad,
+            CAST(pi.total AS decimal(18, 2)) AS total
+        FROM dbo.pro_pedido p
+        INNER JOIN dbo.pro_pedido_item pi ON pi.id_pedido = p.id_pedido
+        WHERE ISNULL(p.Anulado, 0) = 0
+          AND p.fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
+          AND COALESCE(NULLIF(p.zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
+          AND p.tipo IN ('P', 'PD');
         """,
         (months_back,),
     )

@@ -18,16 +18,19 @@ def main() -> None:
 
     facturas = siscor_db.export_facturas_snapshot()
     factura_items = siscor_db.export_factura_items_snapshot()
+    pedido_items = siscor_db.export_pedido_items_snapshot()
     clientes = siscor_db.export_clientes_snapshot()
     creditos = siscor_db.export_creditos_snapshot()
 
     facturas.to_csv(OUTPUT_DIR / "facturas.csv", index=False, encoding="utf-8-sig")
     factura_items.to_csv(OUTPUT_DIR / "factura_items.csv", index=False, encoding="utf-8-sig")
+    pedido_items.to_csv(OUTPUT_DIR / "pedido_items.csv", index=False, encoding="utf-8-sig")
     clientes.to_csv(OUTPUT_DIR / "clientes.csv", index=False, encoding="utf-8-sig")
     creditos.to_csv(OUTPUT_DIR / "creditos.csv", index=False, encoding="utf-8-sig")
 
     print(f"facturas.csv: {len(facturas):,} filas")
     print(f"factura_items.csv: {len(factura_items):,} filas")
+    print(f"pedido_items.csv: {len(pedido_items):,} filas")
     print(f"clientes.csv: {len(clientes):,} filas")
     print(f"creditos.csv: {len(creditos):,} filas")
 
