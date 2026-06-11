@@ -38,6 +38,8 @@ USER_VENDOR_MAP = {
 }
 
 AUTHORIZED_USERS = set(USER_VENDOR_MAP)
+COMMISSIONED_USERS = {"carina", "francisco", "jonatan", "juan", "juancruz", "micaela"}
+COMMISSIONED_VENDORS = {"Carina", "Francisco", "Jonatan", "Juan Cruz M.", "Micaela"}
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,16 @@ class CommissionResult:
 
 def user_can_view(username: str, is_admin: bool = False) -> bool:
     return is_admin or str(username).strip().lower() in AUTHORIZED_USERS
+
+
+def user_earns_commission(username: str) -> bool:
+    return str(username).strip().lower() in COMMISSIONED_USERS
+
+
+def vendor_earns_commission(vendor: object) -> bool:
+    normalized = str(vendor or "").strip().upper().replace(".", "")
+    commissioned = {value.upper().replace(".", "") for value in COMMISSIONED_VENDORS}
+    return normalized in commissioned or normalized == "JUAN CRUZ"
 
 
 def vendor_for_user(username: str) -> str | None:

@@ -1139,8 +1139,8 @@ def show_anura_activity(
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
     st.markdown(
         render_module_heading(
-            "Comisiones",
-            "Comision acumulada calculada desde el ultimo archivo cargado",
+            "Comisiones y Parrilla P.",
+            "Comisiones para vendedores habilitados y cumplimiento por laboratorio",
             "sales",
             "$",
         ),
@@ -1152,11 +1152,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         return
 
     result = commissions.load_latest()
-    if not result.enabled:
-        st.info(result.message)
-        return
-
-    data = result.data.copy()
+    data = result.data.copy() if result.enabled else pd.DataFrame()
     parrilla_objectives = parrilla.load_objectives()
 
     def render_parrilla_progress(vendor_name: str | None) -> None:
@@ -1197,24 +1193,34 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             | set(parrilla.available_vendors(parrilla_objectives))
         )
         selected_vendor = st.selectbox("Vendedor", vendor_options)
-        user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(selected_vendor))]
-        total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
-        st.metric("Comision Acumulada", money(total))
-        st.caption(f"Archivo: {result.source_name}")
-        if user_data.empty:
-            st.info("Sin comisiones registradas en el archivo cargado.")
+        if commissions.vendor_earns_commission(selected_vendor):
+            if not result.enabled:
+                st.info(result.message)
+                render_parrilla_progress(selected_vendor)
+                return
+            user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(selected_vendor))]
+            total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
+            st.metric("Comision Acumulada", money(total))
+            st.caption(f"Archivo: {result.source_name}")
+            if user_data.empty:
+                st.info("Sin comisiones registradas en el archivo cargado.")
         render_parrilla_progress(selected_vendor)
         return
 
     vendor = commissions.vendor_for_user(current_user.username)
     if vendor is None:
         vendor = parrilla.canonical_vendor(current_user.name)
-    user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
-    total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
-    st.metric("Comision Acumulada", money(total))
-    st.caption(f"Archivo: {result.source_name}")
-    if user_data.empty:
-        st.info("Sin comisiones registradas en el archivo cargado.")
+    if commissions.user_earns_commission(current_user.username):
+        if not result.enabled:
+            st.info(result.message)
+            render_parrilla_progress(vendor)
+            return
+        user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
+        total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
+        st.metric("Comision Acumulada", money(total))
+        st.caption(f"Archivo: {result.source_name}")
+        if user_data.empty:
+            st.info("Sin comisiones registradas en el archivo cargado.")
     render_parrilla_progress(vendor)
 
 
@@ -1597,7 +1603,7 @@ with st.sidebar:
             st.session_state["pantalla_activa"] = "Historial Anura"
     if commissions.user_can_view(current_user.username, current_user.is_admin):
         with st.container(key="dm_nav_commissions"):
-            if st.button("Comisiones", use_container_width=True):
+            if st.button("Comisiones y Parrilla P.", use_container_width=True):
                 st.session_state["pantalla_activa"] = "Comisiones"
     pantalla_activa = st.session_state["pantalla_activa"]
 
