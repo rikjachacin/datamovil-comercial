@@ -1091,7 +1091,7 @@ def show_anura_activity(
         unsafe_allow_html=True,
     )
 
-    if zonas and not any(str(zone).strip().upper() in anura_api.TELEMARKETING_ACCOUNTS for zone in zonas):
+    if zonas and not any(anura_api.is_telemarketing_zone(zone) for zone in zonas):
         st.info("Anura aplica a zonas de telemarketing: David, Noelia, Micaela, Maca Protto y Lucia Moreno.")
         return
 

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import unicodedata
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -36,6 +37,28 @@ TELEMARKETING_ACCOUNTS: dict[str, tuple[str, ...]] = {
     "MICAELA GONZALEZ": ("104", "MICAELA"),
     "LUCIA MORENO": ("LUCIA", "LUCIA MORENO"),
 }
+
+
+def _normalize_account(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return "".join(char for char in text.upper() if char.isalnum())
+
+
+def is_telemarketing_zone(zone: object) -> bool:
+    normalized_zone = _normalize_account(zone)
+    if not normalized_zone:
+        return False
+    for key, aliases in TELEMARKETING_ACCOUNTS.items():
+        candidates = (key, *aliases)
+        if any(
+            normalized_zone == _normalize_account(candidate)
+            or normalized_zone in _normalize_account(candidate)
+            or _normalize_account(candidate) in normalized_zone
+            for candidate in candidates
+        ):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -148,8 +171,16 @@ def _account_filter(zones: tuple[str, ...]) -> set[str]:
 
     selected: set[str] = set()
     for zone in zones:
-        key = str(zone).strip().upper()
-        selected.update(value.upper() for value in TELEMARKETING_ACCOUNTS.get(key, ()))
+        normalized_zone = _normalize_account(zone)
+        for key, aliases in TELEMARKETING_ACCOUNTS.items():
+            candidates = (key, *aliases)
+            if any(
+                normalized_zone == _normalize_account(candidate)
+                or normalized_zone in _normalize_account(candidate)
+                or _normalize_account(candidate) in normalized_zone
+                for candidate in candidates
+            ):
+                selected.update(value.upper() for value in aliases)
     return selected
 
 
