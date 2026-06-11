@@ -1170,14 +1170,17 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             st.info(parrilla_result.message)
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
+        for amount_column in ("objetivo", "facturado"):
+            if amount_column in display_data.columns:
+                display_data[amount_column] = display_data[amount_column].map(money)
         st.dataframe(
             display_data,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "laboratorio": "Laboratorio",
-                "objetivo": st.column_config.NumberColumn("Objetivo", format="$ %.0f"),
-                "facturado": st.column_config.NumberColumn("Facturado", format="$ %.0f"),
+                "objetivo": st.column_config.TextColumn("Objetivo"),
+                "facturado": st.column_config.TextColumn("Facturado"),
                 "cumplimiento": st.column_config.ProgressColumn(
                     "% objetivo",
                     format="%.1f %%",
