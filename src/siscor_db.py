@@ -33,7 +33,8 @@ DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 SQL_QUERY_TTL_SECONDS = 30
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
 EXCLUDED_PRODUCT_NAMES = ("DESCUENTO PAGO CDO",)
-COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
+COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND", "PD")
+NEGATIVE_COMMERCIAL_DOCUMENT_TYPES = ("NC", "PD")
 BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 
@@ -261,7 +262,7 @@ def _snapshot_filtered_facturas(
     if zonas_filtro:
         df = df[df["zona"].isin(zonas_filtro)]
 
-    sign = df["tipo"].map(lambda value: -1 if value == "NC" else 1)
+    sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
     df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
     df["subtotal_firmado"] = _to_numeric_amount(df["subtotal"]) * sign
     return df
@@ -358,11 +359,20 @@ def _authorized_invoice_filter(alias: str) -> str:
 
 
 def _signed_total(alias: str, column: str = "total") -> str:
+    negative_types = ", ".join(f"'{doc_type}'" for doc_type in NEGATIVE_COMMERCIAL_DOCUMENT_TYPES)
     return (
-        f"CASE WHEN {alias}.tipo = 'NC' "
+        f"CASE WHEN {alias}.tipo IN ({negative_types}) "
         f"THEN -CAST({alias}.{column} AS decimal(18, 2)) "
         f"ELSE CAST({alias}.{column} AS decimal(18, 2)) END"
     )
+
+
+def _signed_item_total(alias: str, column: str = "total") -> str:
+    return _signed_total(alias, column)
+
+
+def _negative_document_mask(values: Any) -> pd.Series:
+    return pd.Series(values).astype(str).str.upper().isin(NEGATIVE_COMMERCIAL_DOCUMENT_TYPES)
 
 
 def _signed_balance(alias: str, column: str = "saldo") -> str:
@@ -694,7 +704,7 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
         df = items.merge(facturas, on="id_facturacion", how="inner")
         if df.empty:
             return pd.DataFrame(columns=["producto", "cantidad", "total"])
-        sign = df["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
         df["cantidad_firmada"] = _to_numeric_amount(df["cantidad"]) * sign
         df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
         df["producto"] = df["producto"].fillna("")
@@ -715,8 +725,8 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
         SET NOCOUNT ON;
         SELECT TOP (?)
             {product_expr} AS producto,
-            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad,
-            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS total
+            SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS cantidad,
+            SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS total
         FROM dbo.cli_factura_item fi
         INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
         LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
@@ -744,7 +754,7 @@ def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str
         df = items.merge(facturas, on="id_facturacion", how="inner")
         if df.empty:
             return pd.DataFrame(columns=columns)
-        sign = df["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
         df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
         df["marca"] = df["marca"].fillna("").astype(str).str.strip()
         df = df[df["marca"].ne("")]
@@ -764,7 +774,7 @@ def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str
         SELECT
             COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
             COALESCE(NULLIF(fi.marca, ''), 'Sin marca') AS marca,
-            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS total
+            SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS total
         FROM dbo.cli_factura_item fi
         INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
         LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
@@ -932,8 +942,8 @@ def productos_a_impulsar(
             SELECT
                 fi.id_producto,
                 {product_expr} AS producto,
-                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad_mes,
-                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes
+                SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS cantidad_mes,
+                SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS venta_mes
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
@@ -950,8 +960,8 @@ def productos_a_impulsar(
             SELECT
                 fi.id_producto,
                 {product_expr} AS producto,
-                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END) AS cantidad_mes_anterior,
-                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes_anterior
+                SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS cantidad_mes_anterior,
+                SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS venta_mes_anterior
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
@@ -1011,7 +1021,7 @@ def _productos_a_impulsar_from_frames(actual: pd.DataFrame, anterior: pd.DataFra
         if df.empty:
             return pd.DataFrame(columns=["id_producto", "producto", qty_name, total_name])
         temp = df.copy()
-        sign = temp["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        sign = _negative_document_mask(temp["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
         temp[qty_name] = _to_numeric_amount(temp["cantidad"]) * sign
         temp[total_name] = _to_numeric_amount(temp["total"]) * sign
         temp["producto"] = temp["producto"].fillna("")
@@ -1337,23 +1347,23 @@ def estrategia_cliente(
             SELECT
                 {product_expr} AS producto,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
-                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
+                    THEN {_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}
                     ELSE 0 END) AS cantidad,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
-                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
+                    THEN {_signed_item_total("f", "total").replace("f.total", "fi.total")}
                     ELSE 0 END) AS total,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
-                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
+                    THEN {_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}
                     ELSE 0 END) AS cantidad_anterior,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
-                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
+                    THEN {_signed_item_total("f", "total").replace("f.total", "fi.total")}
                     ELSE 0 END) AS total_anterior
                 ,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
-                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.cantidad AS decimal(18, 2)) ELSE CAST(fi.cantidad AS decimal(18, 2)) END
+                    THEN {_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}
                     ELSE 0 END) AS cantidad_historica,
                 SUM(CASE WHEN CAST(f.fecha AS date) BETWEEN ? AND ?
-                    THEN CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END
+                    THEN {_signed_item_total("f", "total").replace("f.total", "fi.total")}
                     ELSE 0 END) AS total_historico
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
@@ -1408,7 +1418,7 @@ def estrategia_cliente(
             SELECT
                 fi.id_producto,
                 {product_expr} AS producto,
-                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes
+                SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS venta_mes
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
@@ -1425,7 +1435,7 @@ def estrategia_cliente(
             SELECT
                 fi.id_producto,
                 {product_expr} AS producto,
-                SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS venta_mes_anterior
+                SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS venta_mes_anterior
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
@@ -1486,7 +1496,7 @@ def _estrategia_cliente_from_frames(
         if facturas.empty:
             return pd.DataFrame(columns=["id_producto", "producto", qty_name, total_name])
         base = facturas[["id_facturacion", "tipo"]].merge(items, on="id_facturacion", how="inner")
-        sign = base["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        sign = _negative_document_mask(base["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
         base[qty_name] = _to_numeric_amount(base["cantidad"]) * sign
         base[total_name] = _to_numeric_amount(base["total"]) * sign
         base["producto"] = base["producto"].fillna("")
@@ -1556,7 +1566,7 @@ def export_facturas_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND ISNULL(autorizado, 0) = 1
           AND fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
-          AND tipo IN ('FC', 'NC', 'ND');
+          AND tipo IN ('FC', 'NC', 'ND', 'PD');
         """,
         (months_back,),
     )
@@ -1582,7 +1592,7 @@ def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND f.fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(f.zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
           {_commercial_product_filter(product_expr)}
-          AND f.tipo IN ('FC', 'NC', 'ND');
+          AND f.tipo IN ('FC', 'NC', 'ND', 'PD');
         """,
         (months_back,),
     )
