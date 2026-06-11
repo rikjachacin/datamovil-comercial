@@ -33,8 +33,8 @@ DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 SQL_QUERY_TTL_SECONDS = 30
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
 EXCLUDED_PRODUCT_NAMES = ("DESCUENTO PAGO CDO",)
-COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND", "PD")
-NEGATIVE_COMMERCIAL_DOCUMENT_TYPES = ("NC", "PD")
+COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND", "PC", "PD")
+NEGATIVE_COMMERCIAL_DOCUMENT_TYPES = ("NC", "PC", "PD")
 BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 
@@ -1566,7 +1566,7 @@ def export_facturas_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND ISNULL(autorizado, 0) = 1
           AND fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
-          AND tipo IN ('FC', 'NC', 'ND', 'PD');
+          AND tipo IN ('FC', 'NC', 'ND', 'PC', 'PD');
         """,
         (months_back,),
     )
@@ -1592,7 +1592,7 @@ def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
           AND f.fecha >= DATEADD(MONTH, -?, CAST(GETDATE() AS date))
           AND COALESCE(NULLIF(f.zona, ''), 'Sin zona') NOT IN ('PROVEEDORES')
           {_commercial_product_filter(product_expr)}
-          AND f.tipo IN ('FC', 'NC', 'ND', 'PD');
+          AND f.tipo IN ('FC', 'NC', 'ND', 'PC', 'PD');
         """,
         (months_back,),
     )
