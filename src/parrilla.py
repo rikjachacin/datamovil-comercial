@@ -139,7 +139,7 @@ def build_progress(
             continue
         for _, lab in labs.iterrows():
             lab_norm = str(lab["lab_norm"])
-            if lab_norm and (lab_norm in sale_norm or sale_norm in lab_norm):
+            if _brand_matches_laboratory(sale_norm, lab_norm):
                 matched_rows.append(
                     {
                         "vendedor": sale["vendedor"],
@@ -163,3 +163,11 @@ def build_progress(
     )
     out = out.loc[:, columns].sort_values(["vendedor", "cumplimiento", "laboratorio"], ascending=[True, False, True])
     return ParrillaResult(True, "OK", out)
+
+
+def _brand_matches_laboratory(brand_norm: str, laboratory_norm: str) -> bool:
+    if not brand_norm or not laboratory_norm:
+        return False
+    if laboratory_norm in {"HOLLIDAY", "MVHOLLIDAY"}:
+        return brand_norm == laboratory_norm
+    return laboratory_norm in brand_norm or brand_norm in laboratory_norm
