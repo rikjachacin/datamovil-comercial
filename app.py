@@ -1169,12 +1169,12 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         if not parrilla_result.enabled:
             st.info(parrilla_result.message)
             return
+        display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
         st.dataframe(
-            parrilla_result.data,
+            display_data,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "vendedor": "Vendedor",
                 "laboratorio": "Laboratorio",
                 "objetivo": st.column_config.NumberColumn("Objetivo", format="$ %.0f"),
                 "facturado": st.column_config.NumberColumn("Facturado", format="$ %.0f"),
