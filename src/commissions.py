@@ -22,12 +22,18 @@ COMMISSIONS_DIR = Path("data/comisiones")
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 USER_VENDOR_MAP = {
+    "bravo": "Bravo",
     "carina": "Carina",
+    "david": "David",
+    "francisco": "Francisco",
     "javier": "Javier",
+    "jonatan": "Jonatan",
     "juan": "Juan Cruz M.",
     "juancruz": "Juan Cruz M.",
     "julio": "Julio M.",
+    "maca": "Macarena",
     "micaela": "Micaela",
+    "noelia": "Noelia",
 }
 
 AUTHORIZED_USERS = set(USER_VENDOR_MAP)

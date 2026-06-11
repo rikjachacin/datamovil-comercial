@@ -734,6 +734,54 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
     )
 
 
+def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
+    columns = ["zona", "marca", "total"]
+    if data_mode() == "snapshot":
+        facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[["id_facturacion", "tipo", "zona"]]
+        items = _snapshot_factura_items()
+        if "marca" not in items.columns:
+            return pd.DataFrame(columns=columns)
+        df = items.merge(facturas, on="id_facturacion", how="inner")
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+        sign = df["tipo"].map(lambda value: -1 if value == "NC" else 1)
+        df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
+        df["marca"] = df["marca"].fillna("").astype(str).str.strip()
+        df = df[df["marca"].ne("")]
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+        return (
+            df.groupby(["zona", "marca"], as_index=False)
+            .agg(total=("total_firmado", "sum"))
+            .sort_values("total", ascending=False)
+        )
+
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    product_expr = _product_name_expr("fi", "p")
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT
+            COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
+            COALESCE(NULLIF(fi.marca, ''), 'Sin marca') AS marca,
+            SUM(CASE WHEN f.tipo = 'NC' THEN -CAST(fi.total AS decimal(18, 2)) ELSE CAST(fi.total AS decimal(18, 2)) END) AS total
+        FROM dbo.cli_factura_item fi
+        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND CAST(f.fecha AS date) BETWEEN ? AND ?
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          {_commercial_product_filter(product_expr)}
+          {zona_sql}
+        GROUP BY COALESCE(NULLIF(f.zona, ''), 'Sin zona'), COALESCE(NULLIF(fi.marca, ''), 'Sin marca')
+        ORDER BY total DESC;
+        """,
+        (fecha_desde, fecha_hasta, *zona_params),
+    )
+
+
 def clientes_a_recuperar(
     mes_actual_desde: str,
     fecha_hasta: str,
@@ -1523,6 +1571,7 @@ def export_factura_items_snapshot(months_back: int = 24) -> pd.DataFrame:
             fi.id_facturacion,
             fi.id_producto,
             {product_expr} AS producto,
+            COALESCE(NULLIF(fi.marca, ''), '') AS marca,
             CAST(fi.cantidad AS decimal(18, 2)) AS cantidad,
             CAST(fi.total AS decimal(18, 2)) AS total
         FROM dbo.cli_factura_item fi

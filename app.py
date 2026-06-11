@@ -15,6 +15,7 @@ from src import auth
 from src import anura_api
 from src import commissions
 from src import objectives
+from src import parrilla
 from src import persat_api
 from src import siscor_db
 
@@ -1135,7 +1136,7 @@ def show_anura_activity(
     )
 
 
-def show_commissions(current_user: auth.User) -> None:
+def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
     st.markdown(
         render_module_heading(
             "Comisiones",
@@ -1156,24 +1157,65 @@ def show_commissions(current_user: auth.User) -> None:
         return
 
     data = result.data.copy()
+    parrilla_objectives = parrilla.load_objectives()
+
+    def render_parrilla_progress(vendor_name: str | None) -> None:
+        st.markdown("#### Cumplimiento por laboratorio")
+        vendor_zones = ()
+        if not current_user.is_admin:
+            vendor_zones = tuple(zone for zone in current_user.zones if zone != "*")
+        sales_by_brand = siscor_db.ventas_por_marca(
+            fecha_desde_mes.isoformat(),
+            fecha_hasta_mes.isoformat(),
+            vendor_zones,
+        )
+        parrilla_result = parrilla.build_progress(parrilla_objectives, sales_by_brand, vendor_name)
+        if not parrilla_result.enabled:
+            st.info(parrilla_result.message)
+            return
+        st.dataframe(
+            parrilla_result.data,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "vendedor": "Vendedor",
+                "laboratorio": "Laboratorio",
+                "objetivo": st.column_config.NumberColumn("Objetivo", format="$ %.0f"),
+                "facturado": st.column_config.NumberColumn("Facturado", format="$ %.0f"),
+                "cumplimiento": st.column_config.ProgressColumn(
+                    "% objetivo",
+                    format="%.1f %%",
+                    min_value=0,
+                    max_value=100,
+                ),
+            },
+        )
+
     if current_user.is_admin:
-        vendor_options = sorted(set(commissions.USER_VENDOR_MAP.values()))
+        vendor_options = sorted(
+            {parrilla.canonical_vendor(value) for value in commissions.USER_VENDOR_MAP.values()}
+            | set(parrilla.available_vendors(parrilla_objectives))
+        )
         selected_vendor = st.selectbox("Vendedor", vendor_options)
-        user_data = data[data["vendedor"].astype(str).str.strip().eq(selected_vendor)]
+        user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(selected_vendor))]
         total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
         st.metric("Comision Acumulada", money(total))
         st.caption(f"Archivo: {result.source_name}")
         if user_data.empty:
             st.info("Sin comisiones registradas en el archivo cargado.")
+        render_parrilla_progress(selected_vendor)
         return
 
     vendor = commissions.vendor_for_user(current_user.username)
-    user_data = data[data["vendedor"].astype(str).str.strip().eq(str(vendor or "").strip())]
+    if vendor is None:
+        vendor = parrilla.canonical_vendor(current_user.name)
+    user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
     total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
     st.metric("Comision Acumulada", money(total))
     st.caption(f"Archivo: {result.source_name}")
     if user_data.empty:
         st.info("Sin comisiones registradas en el archivo cargado.")
+    render_parrilla_progress(vendor)
 
 
 def build_action_radar(
@@ -1567,13 +1609,15 @@ with st.sidebar:
             "Vista",
             options=["Administrador", "Vendedor"],
             index=0,
+            key="modo_vista_selector",
         )
         vista_vendedor_activa = modo_vista == "Vendedor"
 
-    periodo = st.segmented_control(
+    periodo = st.radio(
         "Periodo",
         ["Mes en curso", "Ultimos 30 dias", "Rango"],
-        default="Mes en curso",
+        index=0,
+        horizontal=True,
         key="periodo_selector",
     )
     if st.session_state.get("_ultimo_periodo_selector") != periodo:
@@ -1612,6 +1656,7 @@ with st.sidebar:
             "Zonas",
             options=zonas_disponibles,
             placeholder="Todas las zonas",
+            key="zonas_selector",
         )
     elif current_user.is_admin and vista_vendedor_activa:
         vendedor_simulado = st.selectbox(
@@ -1619,12 +1664,13 @@ with st.sidebar:
             options=zonas_disponibles,
             index=0 if zonas_disponibles else None,
             placeholder="Elegir vendedor",
+            key="vendedor_simulado_selector",
         )
         zona_seleccion = [vendedor_simulado] if vendedor_simulado else []
         st.caption("Vista simulada del vendedor seleccionado")
     else:
         zona_seleccion = [zone for zone in current_user.zones if zone in zonas_disponibles]
-        st.text_input("Zona", value=", ".join(zona_seleccion), disabled=True)
+        st.text_input("Zona", value=", ".join(zona_seleccion), disabled=True, key="zona_usuario_display")
         if not zona_seleccion:
             st.warning("Tu usuario no tiene una zona valida asignada.")
 
@@ -1652,7 +1698,7 @@ if pantalla_activa == "Historial Anura":
     st.stop()
 
 if pantalla_activa == "Comisiones":
-    show_commissions(current_user)
+    show_commissions(current_user, mes_actual_desde, fecha_maxima)
     st.stop()
 
 periodo_dias = (fecha_hasta - fecha_desde).days + 1
