@@ -31,6 +31,7 @@ USER_VENDOR_MAP = {
     "juan": "Juan Cruz M.",
     "juancruz": "Juan Cruz M.",
     "julio": "Julio M.",
+    "lucia": "Lucia",
     "maca": "Macarena",
     "micaela": "Micaela",
     "noelia": "Noelia",
