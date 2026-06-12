@@ -1118,7 +1118,7 @@ def show_anura_activity(
     c5, c6, c7 = st.columns(3)
     c5.metric("Clientes llamados", number(summary["clientes_llamados"]))
     c6.metric("Llamados con venta", number(summary["llamados_con_venta"]))
-    c7.metric("Promedio min. por llamada", number(round(promedio_minutos_llamada, 1)))
+    c7.metric("Promedio min. por llamada", workdays(round(promedio_minutos_llamada, 1)))
 
     selected_anura_zones = (
         [zone for zone in zonas if anura_api.is_telemarketing_zone(zone)]
