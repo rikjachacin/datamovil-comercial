@@ -1116,6 +1116,73 @@ def show_anura_activity(
     c5.metric("Clientes llamados", number(summary["clientes_llamados"]))
     c6.metric("Llamados con venta", number(summary["llamados_con_venta"]))
 
+    selected_anura_zones = (
+        [zone for zone in zonas if anura_api.is_telemarketing_zone(zone)]
+        if zonas
+        else list(anura_api.TELEMARKETING_ACCOUNTS.keys())
+    )
+    daily_target = 20 * max(len(selected_anura_zones), 1)
+    daily = detail.copy()
+    daily["fecha"] = pd.to_datetime(daily["fecha_hora"], errors="coerce").dt.date
+    daily_calls = (
+        daily.dropna(subset=["fecha"])
+        .groupby("fecha", as_index=False)
+        .agg(llamadas=("telefono", "count"), contestadas=("estado", lambda values: values.astype(str).str.upper().eq("CONTESTADA").sum()))
+        .sort_values("fecha")
+    )
+    daily_calls["objetivo"] = daily_target
+    daily_calls["cumplimiento"] = daily_calls["llamadas"] / daily_calls["objetivo"]
+    cumplimiento_promedio = daily_calls["cumplimiento"].mean() if not daily_calls.empty else 0
+    dias_en_meta = int((daily_calls["cumplimiento"] >= 1).sum()) if not daily_calls.empty else 0
+
+    st.markdown("#### Ritmo diario de llamadas")
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Objetivo diario", number(daily_target))
+    r2.metric("Cumplimiento promedio", percent(cumplimiento_promedio))
+    r3.metric("Dias en meta", f"{dias_en_meta}/{len(daily_calls)}")
+
+    if not daily_calls.empty:
+        fig_calls = px.bar(
+            daily_calls,
+            x="fecha",
+            y="llamadas",
+            text="llamadas",
+            color="cumplimiento",
+            color_continuous_scale=["#ef4444", "#d9b51f", "#16a34a"],
+        )
+        fig_calls.add_scatter(
+            x=daily_calls["fecha"],
+            y=daily_calls["objetivo"],
+            mode="lines+markers",
+            name="Objetivo",
+            line=dict(color="#0f7b6c", dash="dash"),
+        )
+        fig_calls.update_traces(textposition="outside", selector=dict(type="bar"))
+        fig_calls.update_layout(
+            xaxis_title="",
+            yaxis_title="Llamadas",
+            coloraxis_showscale=False,
+            hovermode="x unified",
+            height=360,
+        )
+        st.plotly_chart(fig_calls, use_container_width=True)
+
+        daily_view = daily_calls.copy()
+        daily_view["fecha"] = pd.to_datetime(daily_view["fecha"]).dt.strftime("%d/%m/%Y")
+        daily_view["cumplimiento"] = daily_view["cumplimiento"].map(percent)
+        st.dataframe(
+            daily_view.loc[:, ["fecha", "llamadas", "objetivo", "cumplimiento", "contestadas"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "fecha": "Fecha",
+                "llamadas": "Llamadas",
+                "objetivo": "Objetivo",
+                "cumplimiento": "Cumplimiento",
+                "contestadas": "Contestadas",
+            },
+        )
+
     table = detail.copy()
     table["fecha_hora"] = pd.to_datetime(table["fecha_hora"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
     table["duracion_min"] = (pd.to_numeric(table["duracion_seg"], errors="coerce").fillna(0) / 60).round(1)
