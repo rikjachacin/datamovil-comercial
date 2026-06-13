@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 import html
-import json
 from pathlib import Path
 import traceback
 
@@ -1523,13 +1522,10 @@ def app_header_html(subtitle: str) -> str:
 
 def set_session_cookie(token: str) -> None:
     st.query_params[auth.SESSION_QUERY_PARAM] = token
-    encoded_token = json.dumps(token)
     components.html(
         f"""
         <script>
-        const token = {encoded_token};
-        localStorage.setItem("{auth.SESSION_COOKIE_NAME}", token);
-        document.cookie = "{auth.SESSION_COOKIE_NAME}=" + token + "; max-age={auth.SESSION_MAX_AGE_SECONDS}; path=/; SameSite=Lax";
+        document.cookie = "{auth.SESSION_COOKIE_NAME}={token}; max-age={auth.SESSION_MAX_AGE_SECONDS}; path=/; SameSite=Lax";
         </script>
         """,
         height=0,
@@ -1542,35 +1538,7 @@ def clear_session_cookie() -> None:
     components.html(
         f"""
         <script>
-        localStorage.removeItem("{auth.SESSION_COOKIE_NAME}");
         document.cookie = "{auth.SESSION_COOKIE_NAME}=; max-age=0; path=/; SameSite=Lax";
-        </script>
-        """,
-        height=0,
-    )
-
-
-def restore_session_from_browser() -> None:
-    components.html(
-        f"""
-        <script>
-        const key = "{auth.SESSION_COOKIE_NAME}";
-        const param = "{auth.SESSION_QUERY_PARAM}";
-
-        function cookieValue(name) {{
-            const parts = document.cookie.split(";").map(part => part.trim());
-            const match = parts.find(part => part.startsWith(name + "="));
-            return match ? match.substring(name.length + 1) : "";
-        }}
-
-        const savedToken = localStorage.getItem(key) || cookieValue(key);
-        if (savedToken) {{
-            const currentUrl = new URL(window.parent.location.href);
-            if (!currentUrl.searchParams.has(param)) {{
-                currentUrl.searchParams.set(param, savedToken);
-                window.parent.location.replace(currentUrl.toString());
-            }}
-        }}
         </script>
         """,
         height=0,
@@ -1615,7 +1583,6 @@ if "user" not in st.session_state:
         set_session_cookie(session_token)
         st.rerun()
     else:
-        restore_session_from_browser()
         login_screen()
         st.stop()
 
