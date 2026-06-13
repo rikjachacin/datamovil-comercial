@@ -1243,7 +1243,19 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
         if "facturado" in display_data.columns:
             display_data["premio_1_pct"] = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0) * 0.01
-            ordered_columns = ["laboratorio", "objetivo", "facturado", "premio_1_pct", "cumplimiento"]
+            objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
+            total_objetivo = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0).sum()
+            total_facturado = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0).sum()
+            total_premio = display_data["premio_1_pct"].sum()
+            total_row = {
+                "laboratorio": "TOTAL",
+                "objetivo": total_objetivo,
+                "facturado": total_facturado,
+                "cumplimiento": (total_facturado / total_objetivo * 100) if total_objetivo else 0.0,
+                "premio_1_pct": total_premio,
+            }
+            display_data = pd.concat([display_data, pd.DataFrame([total_row])], ignore_index=True)
+            ordered_columns = ["laboratorio", "objetivo", "facturado", "cumplimiento", "premio_1_pct"]
             display_data = display_data[[column for column in ordered_columns if column in display_data.columns]]
         for amount_column in ("objetivo", "facturado", "premio_1_pct"):
             if amount_column in display_data.columns:
@@ -1256,7 +1268,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 "laboratorio": "Laboratorio",
                 "objetivo": st.column_config.TextColumn("Objetivo"),
                 "facturado": st.column_config.TextColumn("Facturado"),
-                "premio_1_pct": st.column_config.TextColumn("Premio 1%"),
+                "premio_1_pct": st.column_config.TextColumn("Premio"),
                 "cumplimiento": st.column_config.ProgressColumn(
                     "% objetivo",
                     format="%.1f %%",
