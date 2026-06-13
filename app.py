@@ -1264,8 +1264,14 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         for amount_column in ("objetivo", "facturado", "premio_1_pct"):
             if amount_column in display_data.columns:
                 display_data[amount_column] = display_data[amount_column].map(money)
+        styled_display_data = display_data.style.set_table_styles(
+            [{"selector": "th", "props": [("font-weight", "700")]}]
+        ).apply(
+            lambda row: ["font-weight: 700" if row.get("laboratorio") == "TOTAL" else "" for _ in row],
+            axis=1,
+        )
         st.dataframe(
-            display_data,
+            styled_display_data,
             use_container_width=True,
             hide_index=True,
             column_config={
