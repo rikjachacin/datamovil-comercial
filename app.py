@@ -1276,14 +1276,15 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             hide_index=True,
             column_config={
                 "laboratorio": "Laboratorio",
-                "objetivo": st.column_config.TextColumn("Objetivo"),
-                "facturado": st.column_config.TextColumn("Facturado"),
-                "premio_1_pct": st.column_config.TextColumn("Premio"),
+                "objetivo": st.column_config.TextColumn("Objetivo", width="small"),
+                "facturado": st.column_config.TextColumn("Facturado", width="small"),
+                "premio_1_pct": st.column_config.TextColumn("Premio", width="small"),
                 "cumplimiento": st.column_config.ProgressColumn(
                     "% objetivo",
                     format="%.1f %%",
                     min_value=0,
                     max_value=100,
+                    width="small",
                 ),
             },
         )
