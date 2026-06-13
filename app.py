@@ -1243,24 +1243,34 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
         if "facturado" in display_data.columns:
-            premio_base = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0) * 0.01
+            objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
+            objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
+            premio_base = objetivo_numeric * 0.01
             display_data["premio_1_pct"] = premio_base.map(
                 lambda amount: float(math.ceil(amount / 5000) * 5000) if amount > 0 else 0.0
             )
-            objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
-            total_objetivo = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0).sum()
+            display_data["_premio_ganado"] = pd.to_numeric(
+                display_data.get("cumplimiento", 0), errors="coerce"
+            ).fillna(0.0).ge(100)
+            total_objetivo = objetivo_numeric.sum()
             total_facturado = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0).sum()
             total_premio = display_data["premio_1_pct"].sum()
+            total_cumplimiento = (total_facturado / total_objetivo * 100) if total_objetivo else 0.0
             total_row = {
                 "laboratorio": "TOTAL",
                 "objetivo": total_objetivo,
                 "facturado": total_facturado,
-                "cumplimiento": (total_facturado / total_objetivo * 100) if total_objetivo else 0.0,
+                "cumplimiento": total_cumplimiento,
                 "premio_1_pct": total_premio,
+                "_premio_ganado": total_cumplimiento >= 100,
             }
             display_data = pd.concat([display_data, pd.DataFrame([total_row])], ignore_index=True)
-            ordered_columns = ["laboratorio", "objetivo", "facturado", "cumplimiento", "premio_1_pct"]
+            premio_ganado = display_data["_premio_ganado"].copy()
+            ordered_columns = ["laboratorio", "objetivo", "facturado", "cumplimiento", "premio_1_pct", "_premio_ganado"]
             display_data = display_data[[column for column in ordered_columns if column in display_data.columns]]
+        else:
+            premio_ganado = pd.Series([False] * len(display_data), index=display_data.index)
+        display_data = display_data.drop(columns=["_premio_ganado"], errors="ignore")
         for amount_column in ("objetivo", "facturado", "premio_1_pct"):
             if amount_column in display_data.columns:
                 display_data[amount_column] = display_data[amount_column].map(money)
@@ -1269,6 +1279,14 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         ).apply(
             lambda row: ["font-weight: 700" if row.get("laboratorio") == "TOTAL" else "" for _ in row],
             axis=1,
+        ).apply(
+            lambda column: [
+                "color: #118a42; font-weight: 700" if bool(premio_ganado.iloc[row_index]) else ""
+                for row_index in range(len(column))
+            ]
+            if column.name == "premio_1_pct"
+            else ["" for _ in column],
+            axis=0,
         )
         st.dataframe(
             styled_display_data,
