@@ -1241,7 +1241,11 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             st.info(parrilla_result.message)
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
-        for amount_column in ("objetivo", "facturado"):
+        if "facturado" in display_data.columns:
+            display_data["premio_1_pct"] = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0) * 0.01
+            ordered_columns = ["laboratorio", "objetivo", "facturado", "premio_1_pct", "cumplimiento"]
+            display_data = display_data[[column for column in ordered_columns if column in display_data.columns]]
+        for amount_column in ("objetivo", "facturado", "premio_1_pct"):
             if amount_column in display_data.columns:
                 display_data[amount_column] = display_data[amount_column].map(money)
         st.dataframe(
@@ -1252,6 +1256,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 "laboratorio": "Laboratorio",
                 "objetivo": st.column_config.TextColumn("Objetivo"),
                 "facturado": st.column_config.TextColumn("Facturado"),
+                "premio_1_pct": st.column_config.TextColumn("Premio 1%"),
                 "cumplimiento": st.column_config.ProgressColumn(
                     "% objetivo",
                     format="%.1f %%",
