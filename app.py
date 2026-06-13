@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 import html
+import math
 from pathlib import Path
 import traceback
 
@@ -1242,7 +1243,10 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
         if "facturado" in display_data.columns:
-            display_data["premio_1_pct"] = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0) * 0.01
+            premio_base = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0) * 0.01
+            display_data["premio_1_pct"] = premio_base.map(
+                lambda amount: float(math.ceil(amount / 5000) * 5000) if amount > 0 else 0.0
+            )
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             total_objetivo = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0).sum()
             total_facturado = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0).sum()
