@@ -1317,12 +1317,12 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 border-radius: 8px;
                 overflow: hidden;
                 background: #ffffff;
-                font-size: 0.68rem;
+                font-size: 0.76rem;
                 line-height: 1.15;
             }
             .dm-lab-table th,
             .dm-lab-table td {
-                padding: 6px 4px;
+                padding: 6px 3px;
                 border-right: 1px solid var(--dm-border);
                 border-bottom: 1px solid var(--dm-border);
                 white-space: nowrap;
