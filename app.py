@@ -1253,60 +1253,63 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             display_data["_premio_ganado"] = pd.to_numeric(
                 display_data.get("cumplimiento", 0), errors="coerce"
             ).fillna(0.0).ge(100)
-            total_objetivo = objetivo_numeric.sum()
-            total_facturado = facturado_numeric.sum()
             total_premio = display_data.loc[display_data["_premio_ganado"], "premio_1_pct"].sum()
-            total_cumplimiento = (total_facturado / total_objetivo * 100) if total_objetivo else 0.0
             total_row = {
                 "laboratorio": "TOTAL",
-                "objetivo": total_objetivo,
-                "facturado": total_facturado,
-                "cumplimiento": total_cumplimiento,
+                "objetivo": pd.NA,
+                "facturado": pd.NA,
+                "cumplimiento": pd.NA,
                 "premio_1_pct": total_premio,
-                "_premio_ganado": total_cumplimiento >= 100,
+                "_premio_ganado": total_premio > 0,
             }
             display_data = pd.concat([display_data, pd.DataFrame([total_row])], ignore_index=True)
             premio_ganado = display_data["_premio_ganado"].copy()
+            cumplimiento_ganado = pd.to_numeric(display_data["cumplimiento"], errors="coerce").fillna(0.0).ge(100)
             ordered_columns = ["laboratorio", "objetivo", "facturado", "cumplimiento", "premio_1_pct", "_premio_ganado"]
             display_data = display_data[[column for column in ordered_columns if column in display_data.columns]]
         else:
             premio_ganado = pd.Series([False] * len(display_data), index=display_data.index)
+            cumplimiento_ganado = pd.Series([False] * len(display_data), index=display_data.index)
         display_data = display_data.drop(columns=["_premio_ganado"], errors="ignore")
         for amount_column in ("objetivo", "facturado", "premio_1_pct"):
             if amount_column in display_data.columns:
                 display_data[amount_column] = display_data[amount_column].map(money)
-        styled_display_data = display_data.style.set_table_styles(
+                display_data.loc[display_data["laboratorio"].eq("TOTAL") & display_data[amount_column].eq("$ 0"), amount_column] = ""
+        if "cumplimiento" in display_data.columns:
+            display_data["cumplimiento"] = display_data["cumplimiento"].map(percent_points)
+            display_data.loc[display_data["laboratorio"].eq("TOTAL"), "cumplimiento"] = ""
+        display_data = display_data.rename(
+            columns={
+                "laboratorio": "Laboratorio",
+                "objetivo": "Objetivo",
+                "facturado": "Facturado",
+                "cumplimiento": "% objetivo",
+                "premio_1_pct": "Premio",
+            }
+        )
+        styled_display_data = display_data.style.hide(axis="index").set_table_styles(
             [{"selector": "th", "props": [("font-weight", "700")]}]
         ).apply(
-            lambda row: ["font-weight: 700" if row.get("laboratorio") == "TOTAL" else "" for _ in row],
+            lambda row: ["font-weight: 700" if row.get("Laboratorio") == "TOTAL" else "" for _ in row],
             axis=1,
         ).apply(
             lambda column: [
                 "color: #118a42; font-weight: 700" if bool(premio_ganado.iloc[row_index]) else ""
                 for row_index in range(len(column))
             ]
-            if column.name == "premio_1_pct"
+            if column.name == "Premio"
+            else ["" for _ in column],
+            axis=0,
+        ).apply(
+            lambda column: [
+                "color: #118a42; font-weight: 700" if bool(cumplimiento_ganado.iloc[row_index]) else ""
+                for row_index in range(len(column))
+            ]
+            if column.name == "% objetivo"
             else ["" for _ in column],
             axis=0,
         )
-        st.dataframe(
-            styled_display_data,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "laboratorio": "Laboratorio",
-                "objetivo": st.column_config.TextColumn("Objetivo", width="small"),
-                "facturado": st.column_config.TextColumn("Facturado", width="small"),
-                "premio_1_pct": st.column_config.TextColumn("Premio", width="small"),
-                "cumplimiento": st.column_config.ProgressColumn(
-                    "% objetivo",
-                    format="%.1f %%",
-                    min_value=0,
-                    max_value=100,
-                    width="small",
-                ),
-            },
-        )
+        st.table(styled_display_data)
 
     if current_user.is_admin:
         vendor_options = sorted(
