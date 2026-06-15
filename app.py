@@ -1245,7 +1245,8 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         if "facturado" in display_data.columns:
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
-            premio_base = objetivo_numeric * 0.01
+            facturado_numeric = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0)
+            premio_base = facturado_numeric * 0.01
             display_data["premio_1_pct"] = premio_base.map(
                 lambda amount: float(math.ceil(amount / 5000) * 5000) if amount > 0 else 0.0
             )
@@ -1253,8 +1254,8 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 display_data.get("cumplimiento", 0), errors="coerce"
             ).fillna(0.0).ge(100)
             total_objetivo = objetivo_numeric.sum()
-            total_facturado = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0).sum()
-            total_premio = display_data["premio_1_pct"].sum()
+            total_facturado = facturado_numeric.sum()
+            total_premio = display_data.loc[display_data["_premio_ganado"], "premio_1_pct"].sum()
             total_cumplimiento = (total_facturado / total_objetivo * 100) if total_objetivo else 0.0
             total_row = {
                 "laboratorio": "TOTAL",
