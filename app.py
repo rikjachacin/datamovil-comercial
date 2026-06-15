@@ -1287,32 +1287,81 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 "premio_1_pct": "Premio",
             }
         )
-        styled_display_data = display_data.style.hide(axis="index").set_table_styles(
-            [
-                {"selector": "th", "props": [("font-weight", "700"), ("font-size", "0.82rem"), ("white-space", "nowrap")]},
-                {"selector": "td", "props": [("font-size", "0.82rem"), ("white-space", "nowrap")]},
-            ]
-        ).apply(
-            lambda row: ["font-weight: 700" if row.get("Laboratorio") == "TOTAL" else "" for _ in row],
-            axis=1,
-        ).apply(
-            lambda column: [
-                "color: #118a42; font-weight: 700" if bool(premio_ganado.iloc[row_index]) else ""
-                for row_index in range(len(column))
-            ]
-            if column.name == "Premio"
-            else ["" for _ in column],
-            axis=0,
-        ).apply(
-            lambda column: [
-                "color: #118a42; font-weight: 700" if bool(cumplimiento_ganado.iloc[row_index]) else ""
-                for row_index in range(len(column))
-            ]
-            if column.name == "% objetivo"
-            else ["" for _ in column],
-            axis=0,
+        for amount_column in ("Objetivo", "Facturado", "Premio"):
+            if amount_column in display_data.columns:
+                display_data[amount_column] = display_data[amount_column].str.replace("$ ", "$", regex=False)
+        rows_html = []
+        for row_position, (_, row) in enumerate(display_data.iterrows()):
+            is_total = str(row.get("Laboratorio", "")) == "TOTAL"
+            total_class = " dm-lab-total" if is_total else ""
+            pct_class = " dm-lab-win" if bool(cumplimiento_ganado.iloc[row_position]) else ""
+            prize_class = " dm-lab-win" if bool(premio_ganado.iloc[row_position]) else ""
+            rows_html.append(
+                "<tr>"
+                f"<td class='dm-lab-name{total_class}'>{html.escape(str(row.get('Laboratorio', '')))}</td>"
+                f"<td class='dm-lab-money{total_class}'>{html.escape(str(row.get('Objetivo', '')))}</td>"
+                f"<td class='dm-lab-money{total_class}'>{html.escape(str(row.get('Facturado', '')))}</td>"
+                f"<td class='dm-lab-pct{pct_class}{total_class}'>{html.escape(str(row.get('% objetivo', '')))}</td>"
+                f"<td class='dm-lab-money{prize_class}{total_class}'>{html.escape(str(row.get('Premio', '')))}</td>"
+                "</tr>"
+            )
+        st.markdown(
+            """
+            <style>
+            .dm-lab-table {
+                width: 100%;
+                table-layout: fixed;
+                border-collapse: separate;
+                border-spacing: 0;
+                border: 1px solid var(--dm-border);
+                border-radius: 8px;
+                overflow: hidden;
+                background: #ffffff;
+                font-size: 0.68rem;
+                line-height: 1.15;
+            }
+            .dm-lab-table th,
+            .dm-lab-table td {
+                padding: 6px 4px;
+                border-right: 1px solid var(--dm-border);
+                border-bottom: 1px solid var(--dm-border);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: clip;
+            }
+            .dm-lab-table th {
+                font-weight: 800;
+                color: var(--dm-muted);
+                background: #f7f9fc;
+            }
+            .dm-lab-table tr:last-child td { border-bottom: 0; }
+            .dm-lab-table th:last-child,
+            .dm-lab-table td:last-child { border-right: 0; }
+            .dm-lab-name { width: 27%; font-weight: 600; }
+            .dm-lab-money { width: 19%; text-align: right; }
+            .dm-lab-pct { width: 16%; text-align: right; }
+            .dm-lab-win { color: #118a42; font-weight: 800; }
+            .dm-lab-total { font-weight: 800; }
+            </style>
+            <table class="dm-lab-table">
+                <thead>
+                    <tr>
+                        <th>Laboratorio</th>
+                        <th>Objetivo</th>
+                        <th>Facturado</th>
+                        <th>% Obj.</th>
+                        <th>Premio</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            + "".join(rows_html)
+            + """
+                </tbody>
+            </table>
+            """,
+            unsafe_allow_html=True,
         )
-        st.table(styled_display_data)
 
     if current_user.is_admin:
         vendor_options = sorted(
