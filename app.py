@@ -1288,7 +1288,10 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             }
         )
         styled_display_data = display_data.style.hide(axis="index").set_table_styles(
-            [{"selector": "th", "props": [("font-weight", "700")]}]
+            [
+                {"selector": "th", "props": [("font-weight", "700"), ("font-size", "0.82rem"), ("white-space", "nowrap")]},
+                {"selector": "td", "props": [("font-size", "0.82rem"), ("white-space", "nowrap")]},
+            ]
         ).apply(
             lambda row: ["font-weight: 700" if row.get("Laboratorio") == "TOTAL" else "" for _ in row],
             axis=1,
