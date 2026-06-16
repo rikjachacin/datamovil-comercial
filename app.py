@@ -1294,6 +1294,8 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 display_data[amount_column] = display_data[amount_column].str.replace("$ ", "$", regex=False)
         rows_html = []
         for row_position, (_, row) in enumerate(display_data.iterrows()):
+            if parrilla.normalize(row.get("Laboratorio", "")) == "VACACIONES":
+                continue
             is_total = str(row.get("Laboratorio", "")) == "TOTAL"
             total_class = " dm-lab-total" if is_total else ""
             pct_class = " dm-lab-win" if bool(cumplimiento_ganado.iloc[row_position]) else ""
