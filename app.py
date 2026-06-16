@@ -1242,6 +1242,8 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             st.info(parrilla_result.message)
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
+        if "laboratorio" in display_data.columns:
+            display_data = display_data[~display_data["laboratorio"].astype(str).str.strip().str.upper().eq("VACACIONES")]
         if "facturado" in display_data.columns:
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
