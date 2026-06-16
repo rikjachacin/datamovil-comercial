@@ -22,7 +22,7 @@ from src import siscor_db
 
 
 APP_NAME = "Bruncas Comercial"
-APP_BUILD = "2026-05-22.1235"
+APP_BUILD = "2026-06-16.1205"
 LOGO_PATH = Path("assets/bruncas_logo.png")
 
 
@@ -1243,7 +1243,9 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
         if "laboratorio" in display_data.columns:
+            display_data = display_data[display_data["laboratorio"].map(parrilla.normalize).ne("VACACIONES")].copy()
             display_data["laboratorio"] = display_data["laboratorio"].map(parrilla.canonical_laboratory)
+            display_data = display_data[display_data["laboratorio"].map(parrilla.normalize).ne("VACACIONES")].copy()
         if "facturado" in display_data.columns:
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
