@@ -18,8 +18,11 @@ except ImportError:
 
 OBJECTIVES_PATH = Path("data/parrilla_objetivos.csv")
 OBJECTIVES_COLUMNS = ["mes", "laboratorio", "vendedor", "objetivo"]
-EXCLUDED_LABORATORIES = {"VACACIONES"}
-LABORATORY_ALIASES: dict[str, str] = {}
+EXCLUDED_LABORATORIES: set[str] = set()
+LABORATORY_ALIASES = {
+    "VACACIONES": "Lab Holliday",
+    "HOLLIDAY": "Lab Holliday",
+}
 
 VENDOR_ALIASES = {
     "BRAVO": "Bravo",
@@ -75,8 +78,7 @@ def canonical_laboratory(value: object) -> str:
 
 
 def is_excluded_laboratory(value: object) -> bool:
-    normalized = normalize(value)
-    return normalized in EXCLUDED_LABORATORIES or "VACACION" in normalized
+    return normalize(value) in EXCLUDED_LABORATORIES
 
 
 def load_objectives() -> pd.DataFrame:
@@ -186,6 +188,8 @@ def build_progress(
 def _brand_matches_laboratory(brand_norm: str, laboratory_norm: str) -> bool:
     if not brand_norm or not laboratory_norm:
         return False
-    if laboratory_norm in {"HOLLIDAY", "MVHOLLIDAY"}:
-        return brand_norm == laboratory_norm
+    if laboratory_norm in {"LABHOLLIDAY", "HOLLIDAY"}:
+        return brand_norm == "HOLLIDAY"
+    if laboratory_norm == "MVHOLLIDAY":
+        return brand_norm == "MVHOLLIDAY"
     return laboratory_norm in brand_norm or brand_norm in laboratory_norm

@@ -22,7 +22,7 @@ from src import siscor_db
 
 
 APP_NAME = "Bruncas Comercial"
-APP_BUILD = "2026-06-16.1325"
+APP_BUILD = "2026-06-16.1405"
 LOGO_PATH = Path("assets/bruncas_logo.png")
 
 
@@ -1231,6 +1231,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         "KONIG",
         "MVHOLLIDAY",
         "TECNOVAX",
+        "LABHOLLIDAY",
         "HOLLIDAY",
         "LABYES",
         "RICHMOND",
