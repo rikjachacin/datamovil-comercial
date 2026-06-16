@@ -75,15 +75,14 @@ def canonical_laboratory(value: object) -> str:
 
 
 def is_excluded_laboratory(value: object) -> bool:
-    return normalize(value) in EXCLUDED_LABORATORIES
+    normalized = normalize(value)
+    return normalized in EXCLUDED_LABORATORIES or "VACACION" in normalized
 
 
 def load_objectives() -> pd.DataFrame:
     csv_path = OBJECTIVES_PATH
     encrypted_path = Path(f"{OBJECTIVES_PATH}.enc")
-    if csv_path.exists():
-        df = pd.read_csv(csv_path)
-    elif encrypted_path.exists():
+    if encrypted_path.exists():
         if Fernet is None:
             raise RuntimeError("Falta cryptography para leer objetivos de parrilla cifrados.")
         key = siscor_db._snapshot_key()
@@ -94,6 +93,8 @@ def load_objectives() -> pd.DataFrame:
         except (InvalidToken, ValueError) as exc:
             raise RuntimeError("No pude descifrar objetivos de parrilla.") from exc
         df = pd.read_csv(BytesIO(content))
+    elif csv_path.exists():
+        df = pd.read_csv(csv_path)
     else:
         return pd.DataFrame(columns=OBJECTIVES_COLUMNS)
 
