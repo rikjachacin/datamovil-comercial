@@ -18,7 +18,9 @@ except ImportError:
 
 OBJECTIVES_PATH = Path("data/parrilla_objetivos.csv")
 OBJECTIVES_COLUMNS = ["mes", "laboratorio", "vendedor", "objetivo"]
-EXCLUDED_LABORATORIES = {"VACACIONES"}
+LABORATORY_ALIASES = {
+    "VACACIONES": "Holliday",
+}
 
 VENDOR_ALIASES = {
     "BRAVO": "Bravo",
@@ -66,6 +68,13 @@ def canonical_vendor(value: object) -> str:
     return str(value or "").strip()
 
 
+def canonical_laboratory(value: object) -> str:
+    normalized = normalize(value)
+    if normalized in LABORATORY_ALIASES:
+        return LABORATORY_ALIASES[normalized]
+    return str(value or "").strip()
+
+
 def load_objectives() -> pd.DataFrame:
     csv_path = OBJECTIVES_PATH
     encrypted_path = Path(f"{OBJECTIVES_PATH}.enc")
@@ -89,10 +98,9 @@ def load_objectives() -> pd.DataFrame:
         if column not in df.columns:
             df[column] = "" if column != "objetivo" else 0
     df = df.loc[:, OBJECTIVES_COLUMNS].copy()
-    df["laboratorio"] = df["laboratorio"].fillna("").astype(str).str.strip()
+    df["laboratorio"] = df["laboratorio"].map(canonical_laboratory)
     df["vendedor"] = df["vendedor"].map(canonical_vendor)
     df["objetivo"] = siscor_db._to_numeric_amount(df["objetivo"])
-    df = df[~df["laboratorio"].map(normalize).isin(EXCLUDED_LABORATORIES)]
     return df[df["laboratorio"].ne("") & df["vendedor"].ne("")]
 
 
@@ -119,9 +127,7 @@ def build_progress(
         )
 
     scoped_objectives = objectives.copy()
-    scoped_objectives = scoped_objectives[
-        ~scoped_objectives["laboratorio"].map(normalize).isin(EXCLUDED_LABORATORIES)
-    ]
+    scoped_objectives["laboratorio"] = scoped_objectives["laboratorio"].map(canonical_laboratory)
     if vendor:
         vendor_name = canonical_vendor(vendor)
         scoped_objectives = scoped_objectives[scoped_objectives["vendedor"].map(canonical_vendor).eq(vendor_name)]

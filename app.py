@@ -1243,7 +1243,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             return
         display_data = parrilla_result.data.drop(columns=["vendedor"], errors="ignore")
         if "laboratorio" in display_data.columns:
-            display_data = display_data[~display_data["laboratorio"].map(parrilla.normalize).eq("VACACIONES")]
+            display_data["laboratorio"] = display_data["laboratorio"].map(parrilla.canonical_laboratory)
         if "facturado" in display_data.columns:
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
@@ -1294,8 +1294,6 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
                 display_data[amount_column] = display_data[amount_column].str.replace("$ ", "$", regex=False)
         rows_html = []
         for row_position, (_, row) in enumerate(display_data.iterrows()):
-            if parrilla.normalize(row.get("Laboratorio", "")) == "VACACIONES":
-                continue
             is_total = str(row.get("Laboratorio", "")) == "TOTAL"
             total_class = " dm-lab-total" if is_total else ""
             pct_class = " dm-lab-win" if bool(cumplimiento_ganado.iloc[row_position]) else ""
