@@ -18,6 +18,7 @@ except ImportError:
 
 OBJECTIVES_PATH = Path("data/parrilla_objetivos.csv")
 OBJECTIVES_COLUMNS = ["mes", "laboratorio", "vendedor", "objetivo"]
+EXCLUDED_LABORATORIES = {"VACACIONES"}
 
 VENDOR_ALIASES = {
     "BRAVO": "Bravo",
@@ -91,6 +92,7 @@ def load_objectives() -> pd.DataFrame:
     df["laboratorio"] = df["laboratorio"].fillna("").astype(str).str.strip()
     df["vendedor"] = df["vendedor"].map(canonical_vendor)
     df["objetivo"] = siscor_db._to_numeric_amount(df["objetivo"])
+    df = df[~df["laboratorio"].map(normalize).isin(EXCLUDED_LABORATORIES)]
     return df[df["laboratorio"].ne("") & df["vendedor"].ne("")]
 
 
@@ -117,6 +119,9 @@ def build_progress(
         )
 
     scoped_objectives = objectives.copy()
+    scoped_objectives = scoped_objectives[
+        ~scoped_objectives["laboratorio"].map(normalize).isin(EXCLUDED_LABORATORIES)
+    ]
     if vendor:
         vendor_name = canonical_vendor(vendor)
         scoped_objectives = scoped_objectives[scoped_objectives["vendedor"].map(canonical_vendor).eq(vendor_name)]
