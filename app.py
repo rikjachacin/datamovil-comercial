@@ -22,7 +22,7 @@ from src import siscor_db
 
 
 APP_NAME = "Bruncas Comercial"
-APP_BUILD = "2026-06-16.1205"
+APP_BUILD = "2026-06-16.1325"
 LOGO_PATH = Path("assets/bruncas_logo.png")
 
 
@@ -1226,16 +1226,26 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
     result = commissions.load_latest()
     data = result.data.copy() if result.enabled else pd.DataFrame()
     parrilla_objectives = parrilla.load_objectives()
+    allowed_parrilla_labs = {
+        "MUNDI",
+        "KONIG",
+        "MVHOLLIDAY",
+        "TECNOVAX",
+        "HOLLIDAY",
+        "LABYES",
+        "RICHMOND",
+        "TOTAL",
+    }
+
+    def keep_allowed_parrilla_rows(df: pd.DataFrame, column: str) -> pd.DataFrame:
+        if df.empty or column not in df.columns:
+            return df.copy()
+        return df[df[column].map(parrilla.normalize).isin(allowed_parrilla_labs)].copy()
+
+    parrilla_objectives = keep_allowed_parrilla_rows(parrilla_objectives, "laboratorio")
 
     def render_parrilla_progress(vendor_name: str | None) -> None:
         st.markdown("#### Cumplimiento por laboratorio")
-
-        def drop_vacaciones_rows(df: pd.DataFrame) -> pd.DataFrame:
-            if df.empty:
-                return df
-            text = df.astype(str)
-            mask = text.apply(lambda col: col.str.contains("vacaciones", case=False, na=False)).any(axis=1)
-            return df.loc[~mask].copy()
 
         vendor_zones = ()
         if not current_user.is_admin:
@@ -1245,17 +1255,14 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
             fecha_hasta_mes.isoformat(),
             vendor_zones,
         )
-        sales_by_brand = drop_vacaciones_rows(sales_by_brand)
         parrilla_result = parrilla.build_progress(parrilla_objectives, sales_by_brand, vendor_name)
         if not parrilla_result.enabled:
             st.info(parrilla_result.message)
             return
-        display_data = drop_vacaciones_rows(parrilla_result.data).drop(columns=["vendedor"], errors="ignore")
+        display_data = keep_allowed_parrilla_rows(parrilla_result.data, "laboratorio").drop(columns=["vendedor"], errors="ignore")
         if "laboratorio" in display_data.columns:
-            display_data = display_data[display_data["laboratorio"].map(parrilla.normalize).ne("VACACIONES")].copy()
             display_data["laboratorio"] = display_data["laboratorio"].map(parrilla.canonical_laboratory)
-            display_data = display_data[display_data["laboratorio"].map(parrilla.normalize).ne("VACACIONES")].copy()
-        display_data = drop_vacaciones_rows(display_data)
+            display_data = keep_allowed_parrilla_rows(display_data, "laboratorio")
         if "facturado" in display_data.columns:
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
@@ -1304,7 +1311,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         for amount_column in ("Objetivo", "Facturado", "Premio"):
             if amount_column in display_data.columns:
                 display_data[amount_column] = display_data[amount_column].str.replace("$ ", "$", regex=False)
-        display_data = drop_vacaciones_rows(display_data).reset_index(drop=True)
+        display_data = keep_allowed_parrilla_rows(display_data, "Laboratorio").reset_index(drop=True)
         win_pct_positions = {idx for idx, value in enumerate(cumplimiento_ganado.tolist()) if value}
         win_prize_positions = {idx for idx, value in enumerate(premio_ganado.tolist()) if value}
 
