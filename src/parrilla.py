@@ -20,8 +20,8 @@ OBJECTIVES_PATH = Path("data/parrilla_objetivos.csv")
 OBJECTIVES_COLUMNS = ["mes", "laboratorio", "vendedor", "objetivo"]
 EXCLUDED_LABORATORIES: set[str] = set()
 LABORATORY_ALIASES = {
-    "VACACIONES": "Lab Holliday",
-    "HOLLIDAY": "Lab Holliday",
+    "VACACIONES": "Holliday",
+    "HOLLIDAY": "Holliday",
 }
 
 VENDOR_ALIASES = {
@@ -188,7 +188,7 @@ def build_progress(
 def _brand_matches_laboratory(brand_norm: str, laboratory_norm: str) -> bool:
     if not brand_norm or not laboratory_norm:
         return False
-    if laboratory_norm in {"LABHOLLIDAY", "HOLLIDAY"}:
+    if laboratory_norm == "HOLLIDAY":
         return brand_norm == "HOLLIDAY"
     if laboratory_norm == "MVHOLLIDAY":
         return brand_norm == "MVHOLLIDAY"
