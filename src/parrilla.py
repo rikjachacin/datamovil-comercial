@@ -18,9 +18,8 @@ except ImportError:
 
 OBJECTIVES_PATH = Path("data/parrilla_objetivos.csv")
 OBJECTIVES_COLUMNS = ["mes", "laboratorio", "vendedor", "objetivo"]
-LABORATORY_ALIASES = {
-    "VACACIONES": "Holliday",
-}
+EXCLUDED_LABORATORIES = {"VACACIONES"}
+LABORATORY_ALIASES: dict[str, str] = {}
 
 VENDOR_ALIASES = {
     "BRAVO": "Bravo",
@@ -75,6 +74,10 @@ def canonical_laboratory(value: object) -> str:
     return str(value or "").strip()
 
 
+def is_excluded_laboratory(value: object) -> bool:
+    return normalize(value) in EXCLUDED_LABORATORIES
+
+
 def load_objectives() -> pd.DataFrame:
     csv_path = OBJECTIVES_PATH
     encrypted_path = Path(f"{OBJECTIVES_PATH}.enc")
@@ -98,6 +101,7 @@ def load_objectives() -> pd.DataFrame:
         if column not in df.columns:
             df[column] = "" if column != "objetivo" else 0
     df = df.loc[:, OBJECTIVES_COLUMNS].copy()
+    df = df[~df["laboratorio"].map(is_excluded_laboratory)].copy()
     df["laboratorio"] = df["laboratorio"].map(canonical_laboratory)
     df["vendedor"] = df["vendedor"].map(canonical_vendor)
     df["objetivo"] = siscor_db._to_numeric_amount(df["objetivo"])
@@ -127,6 +131,7 @@ def build_progress(
         )
 
     scoped_objectives = objectives.copy()
+    scoped_objectives = scoped_objectives[~scoped_objectives["laboratorio"].map(is_excluded_laboratory)].copy()
     scoped_objectives["laboratorio"] = scoped_objectives["laboratorio"].map(canonical_laboratory)
     if vendor:
         vendor_name = canonical_vendor(vendor)
@@ -135,6 +140,7 @@ def build_progress(
         return ParrillaResult(False, "No hay objetivos de parrilla para este vendedor.", pd.DataFrame(columns=columns))
 
     sales = sales_by_brand.copy()
+    sales = sales[~sales["marca"].map(is_excluded_laboratory)].copy()
     sales["vendedor"] = sales["zona"].map(canonical_vendor)
     sales["marca_norm"] = sales["marca"].map(normalize)
     sales["total"] = siscor_db._to_numeric_amount(sales["total"])
