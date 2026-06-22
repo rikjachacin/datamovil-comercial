@@ -800,6 +800,13 @@ def is_telemarketing_zone(zona: object) -> bool:
     return any(token in zona_text for token in TELEMARKETING_ZONE_TOKENS)
 
 
+def user_can_view_clientify(user: auth.User) -> bool:
+    if user.is_admin:
+        return True
+    user_signals = [user.username, user.name, *user.zones]
+    return any(is_telemarketing_zone(value) for value in user_signals)
+
+
 def adapt_action_for_zone(action: object, zona: object) -> str:
     action_text = str(action)
     if not is_telemarketing_zone(zona):
@@ -1817,7 +1824,7 @@ with st.sidebar:
     with st.container(key="dm_nav_anura"):
         if st.button("Historial Anura", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Anura"
-    if current_user.is_admin:
+    if user_can_view_clientify(current_user):
         with st.container(key="dm_nav_clientify"):
             if st.button("Historial Clientify", use_container_width=True):
                 st.session_state["pantalla_activa"] = "Historial Clientify"
@@ -1924,7 +1931,7 @@ if pantalla_activa == "Historial Anura":
     st.stop()
 
 if pantalla_activa == "Historial Clientify":
-    if not current_user.is_admin:
+    if not user_can_view_clientify(current_user):
         st.warning("Tu usuario no tiene habilitado este modulo.")
     else:
         show_clientify_activity("Historial Clientify")
