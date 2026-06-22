@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 import html
+import json
 import math
 from pathlib import Path
 import traceback
@@ -14,6 +15,7 @@ import streamlit.components.v1 as components
 
 from src import auth
 from src import anura_api
+from src import clientify_api
 from src import commissions
 from src import objectives
 from src import parrilla
@@ -400,6 +402,15 @@ st.markdown(
     [data-testid="stSidebar"] .st-key-dm_nav_anura .stButton button:hover {
         border-left-color: #1f9d55;
         color: #116237;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_clientify .stButton button {
+        border-left-color: #2563eb;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_clientify .stButton button:hover {
+        border-left-color: #2563eb;
+        color: #1d4ed8;
     }
 
     [data-baseweb="input"],
@@ -1208,6 +1219,66 @@ def show_anura_activity(
     )
 
 
+def show_clientify_activity(title: str = "Historial Clientify") -> None:
+    st.markdown(
+        render_module_heading(
+            title,
+            "Conversaciones y rendimiento de respuesta en Clientify",
+            "detail",
+            "C",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    report = clientify_api.conversations_report()
+    if not report.enabled:
+        st.warning(report.message)
+        return
+
+    config = {
+        "domain": "https://htxkd.qrveyapp.com",
+        "qv_token": report.token,
+        "i18n": {"lang": "es", "locale": "es-CO"},
+        "personalization": {
+            "enabled": True,
+            "autoSaveFilters": True,
+            "edit_page": False,
+        },
+        "featurePermission": {
+            "downloads": {"hideGeneralDownload": True},
+            "panels": {"global": {"hide_downloads_menu": True}},
+        },
+        "subscriptionsSettings": {"enable_subscriptions": False},
+        "custom_styles": True,
+        "customCSSRules": """
+            @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+            qrvey-end-user, an-panel, .ql-editor {
+                font-family: 'Poppins', sans-serif !important;
+            }
+        """,
+    }
+    config_json = json.dumps(config)
+    widget_url = json.dumps(report.widget_url)
+    components.html(
+        f"""
+        <div id="clientify-report" style="min-height: 900px; width: 100%;"></div>
+        <script>
+            window.config = {config_json};
+            const script = document.createElement("script");
+            script.type = "text/javascript";
+            script.src = {widget_url};
+            script.onload = function() {{
+                const target = document.getElementById("clientify-report");
+                target.innerHTML = '<qrvey-end-user settings="config"></qrvey-end-user>';
+            }};
+            document.body.appendChild(script);
+        </script>
+        """,
+        height=980,
+        scrolling=True,
+    )
+
+
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
     st.markdown(
         render_module_heading(
@@ -1746,6 +1817,10 @@ with st.sidebar:
     with st.container(key="dm_nav_anura"):
         if st.button("Historial Anura", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Anura"
+    if current_user.is_admin:
+        with st.container(key="dm_nav_clientify"):
+            if st.button("Historial Clientify", use_container_width=True):
+                st.session_state["pantalla_activa"] = "Historial Clientify"
     if commissions.user_can_view(current_user.username, current_user.is_admin):
         with st.container(key="dm_nav_commissions"):
             if st.button("Comisiones y Parrilla P.", use_container_width=True):
@@ -1846,6 +1921,13 @@ if pantalla_activa == "Historial Persat":
 
 if pantalla_activa == "Historial Anura":
     show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
+    st.stop()
+
+if pantalla_activa == "Historial Clientify":
+    if not current_user.is_admin:
+        st.warning("Tu usuario no tiene habilitado este modulo.")
+    else:
+        show_clientify_activity("Historial Clientify")
     st.stop()
 
 if pantalla_activa == "Comisiones":
