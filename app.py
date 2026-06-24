@@ -866,12 +866,12 @@ def goal_ranking_html(performance: pd.DataFrame, current_zone: str | None = None
     for _, row in scoped.iterrows():
         pct_value = numeric_value(row["cumplimiento_pct"])
         fill_pct = min(max(pct_value, 0), 100)
-        if pct_value >= 100:
+        if pct_value >= 80:
             color = "#16a34a"
-            status = "Objetivo cumplido"
-        elif pct_value >= 80:
-            color = "#d9b51f"
             status = "En zona saludable"
+        elif pct_value >= 70:
+            color = "#d9b51f"
+            status = "Cerca del ritmo"
         else:
             color = "#ef4444"
             status = "A empujar"
