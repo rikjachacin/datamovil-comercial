@@ -2049,12 +2049,13 @@ if vista_vendedor_activa:
         zonas_filtro,
         limite=5,
     )
-    top_clientes_vendedor = siscor_db.top_clientes(
+    top_clientes_vendedor = siscor_db.clientes_vendidos(
         desde_sql,
         hasta_sql,
         zonas_filtro,
-        limite=8,
     )
+    if not top_clientes_vendedor.empty:
+        top_clientes_vendedor = top_clientes_vendedor.loc[:, ["cliente", "total", "comprobantes"]]
     clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
 
     st.markdown(
@@ -2228,6 +2229,7 @@ if vista_vendedor_activa:
             top_clientes_vendedor,
             use_container_width=True,
             hide_index=True,
+            height=520,
             column_config={
                 "cliente": "Cliente",
                 "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
