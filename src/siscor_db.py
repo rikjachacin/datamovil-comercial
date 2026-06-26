@@ -38,6 +38,16 @@ COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
 NEGATIVE_COMMERCIAL_DOCUMENT_TYPES = ("NC",)
 BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
+SALES_ZONE_OVERRIDES = (
+    {
+        "date": "2026-06-03",
+        "client": "MENDI ARTE EL 6 SOCIEDAD ANONIMA",
+        "source_zone": "LUCIA MORENO",
+        "target_zone": "MACA PROTTO",
+        "id_facturacion": "281509",
+        "invoice_numbers": ("98682", "225914"),
+    },
+)
 
 
 class SnapshotDataMissing(RuntimeError):
@@ -136,6 +146,59 @@ def _to_numeric_amount(values: Any) -> pd.Series:
     thousands_dot = converted.str.match(r"^-?\d{1,3}(\.\d{3})+$", na=False)
     converted.loc[thousands_dot] = converted.loc[thousands_dot].str.replace(".", "", regex=False)
     return pd.to_numeric(converted, errors="coerce").fillna(0)
+
+
+def _raw_zone_expr(alias: str) -> str:
+    return f"COALESCE(NULLIF({alias}.zona, ''), 'Sin zona')"
+
+
+def _sales_zone_expr(alias: str) -> str:
+    base_zone = _raw_zone_expr(alias)
+    cases = []
+    for override in SALES_ZONE_OVERRIDES:
+        invoice_numbers = ", ".join(f"'{number}'" for number in override["invoice_numbers"])
+        cases.append(
+            "WHEN "
+            f"CAST({alias}.fecha AS date) = '{override['date']}' "
+            f"AND UPPER(LTRIM(RTRIM(COALESCE({alias}.cliente, '')))) = '{override['client']}' "
+            f"AND {base_zone} = '{override['source_zone']}' "
+            f"AND (CAST({alias}.id_facturacion AS varchar(50)) = '{override['id_facturacion']}' "
+            f"OR CAST({alias}.numero AS varchar(50)) IN ({invoice_numbers})) "
+            f"THEN '{override['target_zone']}'"
+        )
+    return f"CASE {' '.join(cases)} ELSE {base_zone} END"
+
+
+def _normalize_match_text(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().upper())
+
+
+def _apply_sales_zone_overrides(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "zona" not in df.columns:
+        return df
+
+    out = df.copy()
+    for override in SALES_ZONE_OVERRIDES:
+        mask = pd.Series(True, index=out.index)
+        if "fecha" in out.columns:
+            mask &= pd.to_datetime(out["fecha"], errors="coerce").dt.date == pd.to_datetime(override["date"]).date()
+        if "cliente" in out.columns:
+            clients = out["cliente"].map(_normalize_match_text)
+            mask &= clients == override["client"]
+        if "zona" in out.columns:
+            zones = out["zona"].map(_normalize_match_text)
+            mask &= zones == override["source_zone"]
+
+        invoice_mask = pd.Series(False, index=out.index)
+        if "id_facturacion" in out.columns:
+            invoice_mask |= out["id_facturacion"].astype(str).str.strip().eq(str(override["id_facturacion"]))
+        if "numero" in out.columns:
+            invoice_numbers = {str(number) for number in override["invoice_numbers"]}
+            invoice_mask |= out["numero"].astype(str).str.strip().isin(invoice_numbers)
+        mask &= invoice_mask
+
+        out.loc[mask, "zona"] = override["target_zone"]
+    return out
 
 
 def _snapshot_key() -> str | None:
@@ -258,6 +321,7 @@ def _snapshot_filtered_facturas(
 ) -> pd.DataFrame:
     df = _snapshot_facturas().copy()
     df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
+    df = _apply_sales_zone_overrides(df)
     df = df[~df["zona"].isin(EXCLUDED_COMMERCIAL_ZONES)]
     df = df[df["tipo"].isin(COMMERCIAL_DOCUMENT_TYPES)]
     if "autorizado" in df.columns:
@@ -305,11 +369,12 @@ def month_options() -> pd.DataFrame:
     )
 
 
-def _zona_filter(alias: str, zonas: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+def _zona_filter(alias: str, zonas: tuple[str, ...], zone_expr: str | None = None) -> tuple[str, tuple[str, ...]]:
     if not zonas:
         return "", ()
     placeholders = ", ".join("?" for _ in zonas)
-    return f" AND COALESCE(NULLIF({alias}.zona, ''), 'Sin zona') IN ({placeholders})", zonas
+    expr = zone_expr or _raw_zone_expr(alias)
+    return f" AND {expr} IN ({placeholders})", zonas
 
 
 def _current_client_zone_filter(zones_alias: str, zonas: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
@@ -501,7 +566,8 @@ def kpis(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ())
             }
         )
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     return read_sql(
         f"""
         SET NOCOUNT ON;
@@ -536,7 +602,8 @@ def ventas_por_dia(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, 
         )
         return out
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     return read_sql(
         f"""
         SET NOCOUNT ON;
@@ -571,7 +638,8 @@ def ventas_por_mes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, 
         )
         return out
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     return read_sql(
         f"""
         SET NOCOUNT ON;
@@ -608,12 +676,13 @@ def ventas_por_zona(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str,
             .sort_values("total", ascending=False)
         )
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     return read_sql(
         f"""
         SET NOCOUNT ON;
         SELECT
-            COALESCE(NULLIF(f.zona, ''), 'Sin zona') AS zona,
+            {factura_zone} AS zona,
             SUM({_signed_total("f", "total")}) AS total,
             COUNT(*) AS comprobantes,
             COUNT(DISTINCT f.id_cliente) AS clientes
@@ -624,7 +693,7 @@ def ventas_por_zona(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str,
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
           {zona_sql}
-        GROUP BY COALESCE(NULLIF(f.zona, ''), 'Sin zona')
+        GROUP BY {factura_zone}
         ORDER BY total DESC;
         """,
         (fecha_desde, fecha_hasta, *zona_params),
@@ -646,7 +715,8 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
             .head(limite)
         )
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     return read_sql(
         f"""
         SET NOCOUNT ON;
@@ -682,7 +752,8 @@ def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[st
             .sort_values("total", ascending=False)
         )
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     return read_sql(
         f"""
         SET NOCOUNT ON;
@@ -726,7 +797,8 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
             .head(limite)
         )
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     product_expr = _product_name_expr("fi", "p")
     return read_sql(
         f"""
@@ -940,7 +1012,8 @@ def productos_a_impulsar(
         anterior = items.merge(anterior_facturas, on="id_facturacion", how="inner")
         return _productos_a_impulsar_from_frames(actual, anterior, limite)
 
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro)
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
     product_expr = _product_name_expr("fi", "p")
     return read_sql(
         f"""
@@ -1559,6 +1632,7 @@ def export_facturas_snapshot(months_back: int = 24) -> pd.DataFrame:
         SET NOCOUNT ON;
         SELECT
             id_facturacion,
+            numero,
             CAST(fecha AS datetime) AS fecha,
             tipo,
             tipo_comprobante,
