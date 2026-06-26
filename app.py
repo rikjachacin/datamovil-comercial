@@ -2229,7 +2229,7 @@ if vista_vendedor_activa:
             top_clientes_vendedor,
             use_container_width=True,
             hide_index=True,
-            height=520,
+            height=380,
             column_config={
                 "cliente": "Cliente",
                 "total": st.column_config.NumberColumn("Total", format="$ %.0f"),
