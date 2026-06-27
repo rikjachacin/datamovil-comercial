@@ -1848,7 +1848,7 @@ with st.sidebar:
 
     periodo = st.radio(
         "Periodo",
-        ["Mes en curso", "Ultimos 30 dias", "Rango"],
+        ["Mes en curso", "Ayer", "Rango"],
         index=0,
         horizontal=True,
         key="periodo_selector",
@@ -1863,9 +1863,10 @@ with st.sidebar:
         fecha_desde = mes_actual_desde
         fecha_hasta = fecha_maxima
         st.caption(f"{fecha_desde:%d/%m/%Y} al {fecha_hasta:%d/%m/%Y}")
-    elif periodo == "Ultimos 30 dias":
-        fecha_desde = max(fecha_minima, fecha_maxima - timedelta(days=30))
-        fecha_hasta = fecha_maxima
+    elif periodo == "Ayer":
+        fecha_ayer = fecha_hoy - timedelta(days=1)
+        fecha_desde = min(max(fecha_ayer, fecha_minima), fecha_maxima)
+        fecha_hasta = fecha_desde
         st.caption(f"{fecha_desde:%d/%m/%Y} al {fecha_hasta:%d/%m/%Y}")
     else:
         fecha_desde = st.date_input(
