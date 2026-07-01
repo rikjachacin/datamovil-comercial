@@ -1998,9 +1998,13 @@ if vista_vendedor_activa:
         desempeno_vendedor = pd.DataFrame()
         ranking_equipo_vendedor = pd.DataFrame()
     else:
+        objetivos_vendedor = objetivos_df[
+            (objetivos_df["mes"] == mes_objetivo)
+            & (objetivos_df["zona"].isin(zonas_filtro))
+        ].copy()
         desempeno_vendedor = objectives.monthly_performance(
             ventas_mes_vendedor,
-            objetivos_df,
+            objetivos_vendedor,
             mes_objetivo,
             avance_mes,
             dias_restantes,
