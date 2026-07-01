@@ -1939,7 +1939,7 @@ if pantalla_activa == "Historial Clientify":
     st.stop()
 
 if pantalla_activa == "Comisiones":
-    show_commissions(current_user, mes_actual_desde, fecha_maxima)
+    show_commissions(current_user, fecha_desde, fecha_hasta)
     st.stop()
 
 periodo_dias = (fecha_hasta - fecha_desde).days + 1
