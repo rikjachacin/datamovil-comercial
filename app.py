@@ -1688,6 +1688,9 @@ def clear_session_cookie() -> None:
         f"""
         <script>
         document.cookie = "{auth.SESSION_COOKIE_NAME}=; max-age=0; path=/; SameSite=Lax";
+        document.cookie = "{auth.SESSION_COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax";
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState(null, "", cleanUrl);
         </script>
         """,
         height=0,
@@ -1718,11 +1721,17 @@ def login_screen() -> None:
             if user is None:
                 st.error("Usuario o contrasena incorrectos.")
             else:
+                st.session_state.pop("_logged_out", None)
                 st.session_state["user"] = user
                 token = auth.create_session_token(user)
                 set_session_cookie(token)
                 st.rerun()
 
+
+if st.session_state.get("_logged_out"):
+    clear_session_cookie()
+    login_screen()
+    st.stop()
 
 if "user" not in st.session_state:
     session_token = st.context.cookies.get(auth.SESSION_COOKIE_NAME) or st.query_params.get(auth.SESSION_QUERY_PARAM)
@@ -1748,8 +1757,10 @@ with st.sidebar:
     st.caption("Administrador" if current_user.is_admin else "Zona asignada")
     if st.button("Cerrar sesion", use_container_width=True):
         clear_session_cookie()
-        st.session_state.clear()
-        st.rerun()
+        st.session_state.pop("user", None)
+        st.session_state["_logged_out"] = True
+        login_screen()
+        st.stop()
 
     st.divider()
     if siscor_db.data_mode() == "snapshot":
