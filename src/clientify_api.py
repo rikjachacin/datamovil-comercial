@@ -93,6 +93,10 @@ def _inbox_bearer_token() -> str | None:
     return None
 
 
+def inbox_configured() -> bool:
+    return bool(_inbox_bearer_token())
+
+
 def _request_json(path: str, params: dict[str, object] | None = None) -> dict[str, Any]:
     api_key = _api_key()
     if not api_key:
