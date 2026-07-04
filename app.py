@@ -1226,7 +1226,21 @@ def show_anura_activity(
     )
 
 
-def show_clientify_activity(title: str = "Historial Clientify") -> None:
+def _clientify_seconds(value: object) -> str:
+    seconds = pd.to_numeric(value, errors="coerce")
+    if pd.isna(seconds) or seconds <= 0:
+        return "0 min"
+    minutes = float(seconds) / 60
+    if minutes < 60:
+        return f"{minutes:.1f} min"
+    return f"{minutes / 60:.1f} h"
+
+
+def show_clientify_activity(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    title: str = "Historial Clientify",
+) -> None:
     st.markdown(
         render_module_heading(
             title,
@@ -1236,6 +1250,55 @@ def show_clientify_activity(title: str = "Historial Clientify") -> None:
         ),
         unsafe_allow_html=True,
     )
+
+    inbox = clientify_api.inbox_metrics(fecha_desde_sql, fecha_hasta_sql)
+    if inbox.enabled:
+        summary = inbox.summary
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Conversaciones", number(summary.get("total_conversations", 0)))
+        c2.metric("Primer respuesta", _clientify_seconds(summary.get("first_response_time_seconds", 0)))
+        c3.metric("Tiempo de cierre", _clientify_seconds(summary.get("close_time_seconds", 0)))
+        c4.metric("Nuevos contactos", number(summary.get("new_contacts", 0)))
+
+        if not inbox.daily.empty:
+            daily = inbox.daily.copy()
+            daily["fecha"] = pd.to_datetime(daily["day"]).dt.strftime("%d/%m/%Y")
+            st.markdown("#### Conversaciones por dia")
+            fig = px.bar(
+                daily,
+                x="fecha",
+                y="new_conversations",
+                text="new_conversations",
+                color_discrete_sequence=["#1f5eff"],
+            )
+            fig.update_traces(textposition="outside")
+            fig.update_layout(
+                xaxis_title="",
+                yaxis_title="Conversaciones",
+                height=340,
+                margin=dict(l=20, r=20, t=20, b=20),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        if not inbox.agents.empty:
+            agents = inbox.agents.copy()
+            rename = {
+                "name": "Usuario",
+                "assigned": "Asignadas",
+                "open": "Abiertas",
+                "closed": "Cerradas",
+                "outgoing_messages": "Mensajes salientes",
+                "customer_response_rate": "Respuesta cliente %",
+                "resolution_rate": "Resolucion %",
+            }
+            visible = [col for col in rename if col in agents.columns]
+            if visible:
+                table = agents.loc[:, visible].rename(columns=rename)
+                st.markdown("#### Rendimiento por usuario")
+                st.dataframe(table, use_container_width=True, hide_index=True)
+        return
+
+    st.warning(inbox.message)
 
     report = clientify_api.conversations_report()
     if not report.enabled:
@@ -1954,7 +2017,7 @@ if pantalla_activa == "Historial Clientify":
     if not user_can_view_clientify(current_user):
         st.warning("Tu usuario no tiene habilitado este modulo.")
     else:
-        show_clientify_activity("Historial Clientify")
+        show_clientify_activity(desde_sql, hasta_sql, "Historial Clientify")
     st.stop()
 
 if pantalla_activa == "Comisiones":
