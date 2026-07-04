@@ -1240,6 +1240,14 @@ def show_clientify_activity(title: str = "Historial Clientify") -> None:
     report = clientify_api.conversations_report()
     if not report.enabled:
         st.warning(report.message)
+        st.info(
+            "Diagnostico: Bruncas Comercial puede leer la API principal de Clientify, "
+            "pero el reporte de conversaciones que entrega Clientify esta devolviendo "
+            "error del lado de Clientify. No es un problema de SisCor ni de las ventas."
+        )
+        st.markdown(
+            f"[Abrir reporte nativo de Clientify]({clientify_api.CLIENTIFY_INBOX_REPORT_URL})"
+        )
         return
 
     config = {
