@@ -1856,7 +1856,7 @@ with st.sidebar:
     with st.container(key="dm_nav_anura"):
         if st.button("Historial Anura", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Anura"
-    if user_can_view_clientify(current_user):
+    if user_can_view_clientify(current_user) and clientify_api.inbox_configured():
         with st.container(key="dm_nav_clientify"):
             if st.button("Historial Clientify", use_container_width=True):
                 st.session_state["pantalla_activa"] = "Historial Clientify"
@@ -1964,8 +1964,9 @@ if pantalla_activa == "Historial Anura":
     st.stop()
 
 if pantalla_activa == "Historial Clientify":
-    if not user_can_view_clientify(current_user):
-        st.warning("Tu usuario no tiene habilitado este modulo.")
+    if not user_can_view_clientify(current_user) or not clientify_api.inbox_configured():
+        st.session_state["pantalla_activa"] = "Panel comercial"
+        st.rerun()
     else:
         show_clientify_activity(desde_sql, hasta_sql, "Historial Clientify")
     st.stop()
