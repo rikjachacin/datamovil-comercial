@@ -22,7 +22,6 @@ except ImportError:
 
 
 API_BASE_URL = "https://api.clientify.com/v1"
-CLIENTIFY_INBOX_REPORT_URL = "https://new.clientify.com/reports/inbox"
 ENCRYPTED_KEY_PATH = Path("data/clientify_api_key.enc")
 REQUEST_TIMEOUT_SECONDS = 25
 
@@ -82,12 +81,6 @@ def _request_json(path: str, params: dict[str, object] | None = None) -> dict[st
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             payload = response.read()
     except HTTPError as exc:
-        if path.lstrip("/") == "qrveys/auth" and exc.code >= 500:
-            raise RuntimeError(
-                "Clientify tiene caido el reporte embebido de conversaciones "
-                "(HTTP 500). La API key esta cargada y responde en otros modulos, "
-                "pero este reporte depende de un servicio interno de Clientify."
-            ) from exc
         raise RuntimeError(f"Clientify respondio error HTTP {exc.code}.") from exc
     except URLError as exc:
         raise RuntimeError("No se pudo conectar con Clientify.") from exc
