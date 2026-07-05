@@ -1157,6 +1157,9 @@ def show_anura_activity(
     )
     daily_calls["objetivo"] = daily_target
     daily_calls["cumplimiento"] = daily_calls["llamadas"] / daily_calls["objetivo"]
+    daily_calls["estado_meta"] = daily_calls["cumplimiento"].map(
+        lambda value: "Verde" if value >= 1 else ("Amarillo" if value >= 0.7 else "Rojo")
+    )
     cumplimiento_promedio = daily_calls["cumplimiento"].mean() if not daily_calls.empty else 0
     dias_en_meta = int((daily_calls["cumplimiento"] >= 1).sum()) if not daily_calls.empty else 0
 
@@ -1172,8 +1175,12 @@ def show_anura_activity(
             x="fecha",
             y="llamadas",
             text="llamadas",
-            color="cumplimiento",
-            color_continuous_scale=["#ef4444", "#d9b51f", "#16a34a"],
+            color="estado_meta",
+            color_discrete_map={
+                "Rojo": "#ef4444",
+                "Amarillo": "#d9b51f",
+                "Verde": "#16a34a",
+            },
         )
         fig_calls.add_scatter(
             x=daily_calls["fecha"],
@@ -1186,7 +1193,7 @@ def show_anura_activity(
         fig_calls.update_layout(
             xaxis_title="",
             yaxis_title="Llamadas",
-            coloraxis_showscale=False,
+            legend_title_text="Estado",
             hovermode="x unified",
             height=360,
         )
