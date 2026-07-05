@@ -1298,13 +1298,63 @@ def show_clientify_activity(
                 st.dataframe(table, use_container_width=True, hide_index=True)
         return
 
-    st.info(
-        "El modulo de Clientify esta preparado, pero falta configurar el token de Inbox "
-        "para leer conversaciones, tiempos de respuesta y rendimiento por usuario."
+    st.warning(inbox.message)
+
+    report = clientify_api.conversations_report()
+    if not report.enabled:
+        st.warning(report.message)
+        st.info(
+            "Diagnostico: Bruncas Comercial puede leer la API principal de Clientify, "
+            "pero el reporte de conversaciones que entrega Clientify esta devolviendo "
+            "error del lado de Clientify. No es un problema de SisCor ni de las ventas."
+        )
+        st.markdown(
+            f"[Abrir reporte nativo de Clientify]({clientify_api.CLIENTIFY_INBOX_REPORT_URL})"
+        )
+        return
+
+    config = {
+        "domain": "https://htxkd.qrveyapp.com",
+        "qv_token": report.token,
+        "i18n": {"lang": "es", "locale": "es-CO"},
+        "personalization": {
+            "enabled": True,
+            "autoSaveFilters": True,
+            "edit_page": False,
+        },
+        "featurePermission": {
+            "downloads": {"hideGeneralDownload": True},
+            "panels": {"global": {"hide_downloads_menu": True}},
+        },
+        "subscriptionsSettings": {"enable_subscriptions": False},
+        "custom_styles": True,
+        "customCSSRules": """
+            @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+            qrvey-end-user, an-panel, .ql-editor {
+                font-family: 'Poppins', sans-serif !important;
+            }
+        """,
+    }
+    config_json = json.dumps(config)
+    widget_url = json.dumps(report.widget_url)
+    components.html(
+        f"""
+        <div id="clientify-report" style="min-height: 900px; width: 100%;"></div>
+        <script>
+            window.config = {config_json};
+            const script = document.createElement("script");
+            script.type = "text/javascript";
+            script.src = {widget_url};
+            script.onload = function() {{
+                const target = document.getElementById("clientify-report");
+                target.innerHTML = '<qrvey-end-user settings="config"></qrvey-end-user>';
+            }};
+            document.body.appendChild(script);
+        </script>
+        """,
+        height=980,
+        scrolling=True,
     )
-    st.caption(inbox.message)
-    st.markdown(f"[Abrir reporte nativo de Clientify]({clientify_api.CLIENTIFY_INBOX_REPORT_URL})")
-    return
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
