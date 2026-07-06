@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, time
 from pathlib import Path
@@ -252,37 +253,88 @@ def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str,
         "time_zone": "America/Buenos_Aires",
         "compare_with_previous": "true",
     }
+    total_days = max((end_date - start_date).days + 1, 1)
+    if _inbox_bearer_token():
+        try:
+            summary_data = _request_metric_json("dashboard/summary/", metric_params)
+            daily_data = _request_metric_json("dashboard/timeseries/", {**metric_params, "series": "daily"})
+            current = summary_data.get("current") if isinstance(summary_data.get("current"), dict) else summary_data
+            total_conversations = int(current.get("total_conversations") or 0)
+            daily_rows = daily_data.get("buckets") or daily_data.get("items") or daily_data.get("series") or []
+            by_day = []
+            for row in daily_rows:
+                if not isinstance(row, dict):
+                    continue
+                day = row.get("day") or row.get("date")
+                if not day:
+                    continue
+                by_day.append({"fecha": str(day), "conversaciones": int(row.get("count") or row.get("value") or 0)})
+            return ClientifyActivity(
+                True,
+                "OK" if total_conversations else "No hay conversaciones de Clientify en el periodo seleccionado.",
+                {
+                    "conversaciones": total_conversations,
+                    "promedio_diario": total_conversations / total_days,
+                    "dias_periodo": total_days,
+                    "fuente": "metricas",
+                },
+                sorted(by_day, key=lambda row: row["fecha"]),
+                [],
+            )
+        except Exception:
+            pass
+
+    start_dt = datetime.combine(start_date, time.min)
+    end_dt = datetime.combine(end_date, time.max)
     try:
-        summary_data = _request_metric_json("dashboard/summary/", metric_params)
-        daily_data = _request_metric_json("dashboard/timeseries/", {**metric_params, "series": "daily"})
+        base_params = {
+            "page_size": 100,
+            "last_interaction__date__gte": fecha_desde_sql,
+            "last_interaction__date__lte": fecha_hasta_sql,
+        }
+        pages: list[dict[str, Any]] = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [
+                executor.submit(_request_inbox_json, "conversations/", {**base_params, "page": page})
+                for page in range(1, 6)
+            ]
+            for future in as_completed(futures):
+                pages.append(future.result())
     except Exception as exc:
         return ClientifyActivity(False, str(exc), {}, [], [])
 
-    current = summary_data.get("current") if isinstance(summary_data.get("current"), dict) else summary_data
-    total_days = max((end_date - start_date).days + 1, 1)
-    total_conversations = int(current.get("total_conversations") or 0)
-
-    summary = {
-        "conversaciones": total_conversations,
-        "promedio_diario": total_conversations / total_days,
-        "dias_periodo": total_days,
-        "canal": "Todos",
-    }
-
-    daily_rows = daily_data.get("buckets") or daily_data.get("items") or daily_data.get("series") or []
+    rows: list[dict[str, Any]] = []
+    for page in pages:
+        page_rows = page.get("results") or []
+        if isinstance(page_rows, list):
+            rows.extend(row for row in page_rows if isinstance(row, dict))
     by_day = []
-    for row in daily_rows:
-        if not isinstance(row, dict):
+    by_day_map: dict[str, int] = {}
+    for row in rows if isinstance(rows, list) else []:
+        owner = _owner_name(row.get("owner"))
+        if not _owner_matches_zones(owner, zones):
             continue
-        day = row.get("day") or row.get("date")
-        if not day:
+        last_dt = _parse_dt(row.get("last_interaction") or row.get("created"))
+        if not last_dt:
             continue
-        by_day.append({"fecha": str(day), "conversaciones": int(row.get("count") or row.get("value") or 0)})
+        naive_last = last_dt.replace(tzinfo=None)
+        if not (start_dt <= naive_last <= end_dt):
+            continue
+        day = last_dt.date().isoformat()
+        by_day_map[day] = by_day_map.get(day, 0) + 1
+
+    total_conversations = sum(by_day_map.values())
+    by_day = [{"fecha": day, "conversaciones": value} for day, value in by_day_map.items()]
 
     return ClientifyActivity(
         True,
         "OK" if total_conversations else "No hay conversaciones de Clientify en el periodo seleccionado.",
-        summary,
+        {
+            "conversaciones": total_conversations,
+            "promedio_diario": total_conversations / total_days,
+            "dias_periodo": total_days,
+            "fuente": "api_publica",
+        },
         sorted(by_day, key=lambda row: row["fecha"]),
         [],
     )

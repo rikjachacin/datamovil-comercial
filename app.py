@@ -1261,31 +1261,9 @@ def show_clientify_activity(
         return
 
     summary = result.summary
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     c1.metric("Conversaciones", number(summary.get("conversaciones", 0)))
     c2.metric("Promedio diario", f"{numeric_value(summary.get('promedio_diario', 0)):.1f}")
-    c3.metric("Canal", str(summary.get("canal") or "Todos"))
-
-    by_day = pd.DataFrame(result.by_day)
-    if not by_day.empty:
-        by_day["fecha"] = pd.to_datetime(by_day["fecha"])
-        fig_day = px.bar(
-            by_day,
-            x="fecha",
-            y="conversaciones",
-            text="conversaciones",
-            color_discrete_sequence=["#2563eb"],
-        )
-        fig_day.update_traces(textposition="outside")
-        fig_day.update_layout(
-            title="Conversaciones con actividad por dia",
-            xaxis_title="",
-            yaxis_title="Conversaciones",
-            legend_title_text="",
-            height=360,
-            hovermode="x unified",
-        )
-        st.plotly_chart(fig_day, use_container_width=True)
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
