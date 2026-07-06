@@ -1235,7 +1235,12 @@ def show_anura_activity(
     )
 
 
-def show_clientify_activity(title: str = "Historial Clientify") -> None:
+def show_clientify_activity(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zonas: tuple[str, ...],
+    title: str = "Historial Clientify",
+) -> None:
     st.markdown(
         render_module_heading(
             title,
@@ -1246,53 +1251,86 @@ def show_clientify_activity(title: str = "Historial Clientify") -> None:
         unsafe_allow_html=True,
     )
 
-    report = clientify_api.conversations_report()
-    if not report.enabled:
-        st.warning(report.message)
+    result = clientify_api.inbox_activity(fecha_desde_sql, fecha_hasta_sql, zonas)
+    if not result.enabled:
+        st.warning(result.message)
         return
 
-    config = {
-        "domain": "https://htxkd.qrveyapp.com",
-        "qv_token": report.token,
-        "i18n": {"lang": "es", "locale": "es-CO"},
-        "personalization": {
-            "enabled": True,
-            "autoSaveFilters": True,
-            "edit_page": False,
-        },
-        "featurePermission": {
-            "downloads": {"hideGeneralDownload": True},
-            "panels": {"global": {"hide_downloads_menu": True}},
-        },
-        "subscriptionsSettings": {"enable_subscriptions": False},
-        "custom_styles": True,
-        "customCSSRules": """
-            @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
-            qrvey-end-user, an-panel, .ql-editor {
-                font-family: 'Poppins', sans-serif !important;
-            }
-        """,
-    }
-    config_json = json.dumps(config)
-    widget_url = json.dumps(report.widget_url)
-    components.html(
-        f"""
-        <div id="clientify-report" style="min-height: 900px; width: 100%;"></div>
-        <script>
-            window.config = {config_json};
-            const script = document.createElement("script");
-            script.type = "text/javascript";
-            script.src = {widget_url};
-            script.onload = function() {{
-                const target = document.getElementById("clientify-report");
-                target.innerHTML = '<qrvey-end-user settings="config"></qrvey-end-user>';
-            }};
-            document.body.appendChild(script);
-        </script>
-        """,
-        height=980,
-        scrolling=True,
-    )
+    if not result.detail:
+        st.info(result.message)
+        return
+
+    summary = result.summary
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Conversaciones", number(summary.get("conversaciones", 0)))
+    c2.metric("Abiertas", number(summary.get("abiertas", 0)))
+    c3.metric("Cerradas", number(summary.get("cerradas", 0)))
+    c4.metric("Usuarios activos", number(summary.get("vendedores", 0)))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Congeladas", number(summary.get("congeladas", 0)))
+    c6.metric("Fuente", "Inbox")
+    c7.metric("Periodo", f"{pd.to_datetime(fecha_desde_sql):%d/%m} al {pd.to_datetime(fecha_hasta_sql):%d/%m}")
+    c8.metric("Canal", "WhatsApp")
+
+    by_day = pd.DataFrame(result.by_day)
+    if not by_day.empty:
+        by_day["fecha"] = pd.to_datetime(by_day["fecha"])
+        fig_day = px.bar(
+            by_day,
+            x="fecha",
+            y="conversaciones",
+            text="conversaciones",
+            color_discrete_sequence=["#2563eb"],
+        )
+        fig_day.update_traces(textposition="outside")
+        fig_day.update_layout(
+            title="Conversaciones con actividad por dia",
+            xaxis_title="",
+            yaxis_title="Conversaciones",
+            legend_title_text="",
+            height=360,
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig_day, use_container_width=True)
+
+    by_owner = pd.DataFrame(result.by_owner)
+    if not by_owner.empty:
+        st.markdown("#### Rendimiento por usuario")
+        owner_view = by_owner.copy()
+        owner_view["participacion"] = owner_view["conversaciones"] / owner_view["conversaciones"].sum()
+        owner_view["participacion"] = owner_view["participacion"].map(percent)
+        st.dataframe(
+            owner_view.loc[:, ["vendedor", "conversaciones", "abiertas", "cerradas", "participacion"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "vendedor": "Usuario",
+                "conversaciones": "Conversaciones",
+                "abiertas": "Abiertas",
+                "cerradas": "Cerradas",
+                "participacion": "Participacion",
+            },
+        )
+
+    detail = pd.DataFrame(result.detail)
+    if not detail.empty:
+        st.markdown("#### Ultimas interacciones")
+        detail_view = detail.copy()
+        detail_view["fecha_hora"] = pd.to_datetime(detail_view["fecha_hora"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
+        st.dataframe(
+            detail_view.loc[:, ["fecha_hora", "vendedor", "cliente", "estado", "ultimo_mensaje", "canal"]].head(80),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "fecha_hora": "Fecha y hora",
+                "vendedor": "Usuario",
+                "cliente": "Cliente",
+                "estado": "Estado",
+                "ultimo_mensaje": "Ultimo mensaje",
+                "canal": "Canal",
+            },
+        )
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
@@ -1955,7 +1993,7 @@ if pantalla_activa == "Historial Clientify":
     if not user_can_view_clientify(current_user):
         st.warning("Tu usuario no tiene habilitado este modulo.")
     else:
-        show_clientify_activity("Historial Clientify")
+        show_clientify_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Clientify")
     st.stop()
 
 if pantalla_activa == "Comisiones":
