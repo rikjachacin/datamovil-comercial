@@ -1264,13 +1264,7 @@ def show_clientify_activity(
     c1, c2, c3 = st.columns(3)
     c1.metric("Conversaciones", number(summary.get("conversaciones", 0)))
     c2.metric("Promedio diario", f"{numeric_value(summary.get('promedio_diario', 0)):.1f}")
-    c3.metric("Canales", number(summary.get("canales", 0)))
-
-    if summary.get("muestra_limitada"):
-        st.caption(
-            "Vista rapida: para que la consulta no se vuelva lenta, Clientify se resume con "
-            f"las primeras {number(summary.get('limite_registros', 200))} conversaciones del periodo."
-        )
+    c3.metric("Canal", str(summary.get("canal") or "Todos"))
 
     by_day = pd.DataFrame(result.by_day)
     if not by_day.empty:
@@ -1292,25 +1286,6 @@ def show_clientify_activity(
             hovermode="x unified",
         )
         st.plotly_chart(fig_day, use_container_width=True)
-
-    by_channel = pd.DataFrame(result.by_channel)
-    if not by_channel.empty:
-        fig_channel = px.bar(
-            by_channel.sort_values("conversaciones"),
-            x="conversaciones",
-            y="canal",
-            orientation="h",
-            text="conversaciones",
-            color_discrete_sequence=["#0f7b6c"],
-        )
-        fig_channel.update_traces(textposition="outside")
-        fig_channel.update_layout(
-            title="Conversaciones por canal",
-            xaxis_title="Conversaciones",
-            yaxis_title="",
-            height=max(280, 70 + 44 * len(by_channel)),
-        )
-        st.plotly_chart(fig_channel, use_container_width=True)
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:

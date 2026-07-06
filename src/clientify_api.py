@@ -24,6 +24,7 @@ except ImportError:
 
 API_BASE_URL = "https://api.clientify.com/v1"
 INBOX_API_BASE_URL = "https://api.clientify.com/team-inbox/api"
+CLIENTIFY_PLUS_BASE_URL = "https://plus.clientify.com/team-inbox/api/metrics"
 ENCRYPTED_KEY_PATH = Path("data/clientify_api_key.enc")
 REQUEST_TIMEOUT_SECONDS = 25
 
@@ -77,6 +78,21 @@ def _api_key() -> str | None:
         return None
 
 
+def _inbox_bearer_token() -> str | None:
+    token = os.getenv("CLIENTIFY_INBOX_BEARER_TOKEN")
+    if token:
+        return token.strip()
+
+    try:
+        token = st.secrets.get("clientify", {}).get("inbox_bearer_token")
+        if token:
+            return str(token).strip()
+    except StreamlitSecretNotFoundError:
+        pass
+
+    return None
+
+
 def _request_json(path: str, params: dict[str, object] | None = None) -> dict[str, Any]:
     api_key = _api_key()
     if not api_key:
@@ -120,6 +136,34 @@ def _request_inbox_json(path: str, params: dict[str, object] | None = None) -> d
         raise RuntimeError(f"Clientify respondio error HTTP {exc.code}.") from exc
     except URLError as exc:
         raise RuntimeError("No se pudo conectar con Clientify.") from exc
+    return json.loads(payload.decode("utf-8"))
+
+
+def _request_metric_json(path: str, params: dict[str, object] | None = None) -> dict[str, Any]:
+    token = _inbox_bearer_token()
+    if not token:
+        raise RuntimeError(
+            "Clientify no tiene configurada la credencial del Inbox para metricas exactas. "
+            "No se muestran datos parciales para evitar diferencias con Clientify."
+        )
+
+    query = f"?{urlencode(params)}" if params else ""
+    request = Request(
+        f"{CLIENTIFY_PLUS_BASE_URL}/{path.lstrip('/')}{query}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            payload = response.read()
+    except HTTPError as exc:
+        raise RuntimeError(f"Clientify respondio error HTTP {exc.code} en metricas exactas.") from exc
+    except URLError as exc:
+        raise RuntimeError("No se pudo conectar con las metricas exactas de Clientify.") from exc
     return json.loads(payload.decode("utf-8"))
 
 
@@ -196,89 +240,51 @@ def _message_direction(message: dict[str, Any]) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str, ...] = ()) -> ClientifyActivity:
-    if not _api_key():
-        return ClientifyActivity(False, "Falta configurar la API key de Clientify.", {}, [], [])
-
     try:
         start_date = datetime.fromisoformat(fecha_desde_sql).date()
         end_date = datetime.fromisoformat(fecha_hasta_sql).date()
     except ValueError:
         return ClientifyActivity(False, "Rango de fechas invalido para Clientify.", {}, [], [])
 
-    start_dt = datetime.combine(start_date, time.min)
-    end_dt = datetime.combine(end_date, time.max)
-    conversations: list[dict[str, Any]] = []
-    has_more = False
-
+    metric_params = {
+        "date_start": fecha_desde_sql,
+        "date_end": fecha_hasta_sql,
+        "time_zone": "America/Buenos_Aires",
+        "compare_with_previous": "true",
+    }
     try:
-        data = _request_inbox_json(
-            "conversations/",
-            {
-                "page_size": 50,
-                "page": 1,
-                "last_interaction__date__gte": fecha_desde_sql,
-                "last_interaction__date__lte": fecha_hasta_sql,
-            },
-        )
-        rows = data.get("results") or []
-        if isinstance(rows, list):
-            conversations.extend(rows)
-        has_more = bool(data.get("next"))
+        summary_data = _request_metric_json("dashboard/summary/", metric_params)
+        daily_data = _request_metric_json("dashboard/timeseries/", {**metric_params, "series": "daily"})
     except Exception as exc:
         return ClientifyActivity(False, str(exc), {}, [], [])
 
-    detail: list[dict[str, Any]] = []
-
-    for conversation in conversations:
-        owner = _owner_name(conversation.get("owner"))
-        if not _owner_matches_zones(owner, zones):
-            continue
-        conv_id = conversation.get("id")
-        if not conv_id:
-            continue
-        last_dt = _parse_dt(conversation.get("last_interaction") or conversation.get("created"))
-        if not last_dt:
-            continue
-        naive_last = last_dt.replace(tzinfo=None)
-        if not (start_dt <= naive_last <= end_dt):
-            continue
-
-        status = str(conversation.get("status") or "sin estado").lower()
-        detail.append(
-            {
-                "fecha": last_dt.date().isoformat(),
-                "estado": status,
-                "canal": str(conversation.get("channel_type") or "Sin canal").strip().title() or "Sin canal",
-            }
-        )
-
+    current = summary_data.get("current") if isinstance(summary_data.get("current"), dict) else summary_data
     total_days = max((end_date - start_date).days + 1, 1)
+    total_conversations = int(current.get("total_conversations") or 0)
+
     summary = {
-        "conversaciones": len(detail),
-        "promedio_diario": len(detail) / total_days,
+        "conversaciones": total_conversations,
+        "promedio_diario": total_conversations / total_days,
         "dias_periodo": total_days,
-        "canales": len({row["canal"] for row in detail}),
-        "muestra_limitada": has_more,
-        "limite_registros": 50,
+        "canal": "Todos",
     }
 
-    by_day_map: dict[str, dict[str, Any]] = {}
-    by_channel_map: dict[str, dict[str, Any]] = {}
-    for row in detail:
-        day = row["fecha"]
-        day_bucket = by_day_map.setdefault(day, {"fecha": day, "conversaciones": 0})
-        day_bucket["conversaciones"] += 1
-
-        channel = row["canal"]
-        channel_bucket = by_channel_map.setdefault(channel, {"canal": channel, "conversaciones": 0})
-        channel_bucket["conversaciones"] += 1
+    daily_rows = daily_data.get("buckets") or daily_data.get("items") or daily_data.get("series") or []
+    by_day = []
+    for row in daily_rows:
+        if not isinstance(row, dict):
+            continue
+        day = row.get("day") or row.get("date")
+        if not day:
+            continue
+        by_day.append({"fecha": str(day), "conversaciones": int(row.get("count") or row.get("value") or 0)})
 
     return ClientifyActivity(
         True,
-        "OK" if detail else "No hay conversaciones de Clientify en el periodo seleccionado.",
+        "OK" if total_conversations else "No hay conversaciones de Clientify en el periodo seleccionado.",
         summary,
-        sorted(by_day_map.values(), key=lambda row: row["fecha"]),
-        sorted(by_channel_map.values(), key=lambda row: row["conversaciones"], reverse=True),
+        sorted(by_day, key=lambda row: row["fecha"]),
+        [],
     )
 
 
