@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 import html
-import json
 import math
 from pathlib import Path
 import traceback
@@ -15,7 +14,6 @@ import streamlit.components.v1 as components
 
 from src import auth
 from src import anura_api
-from src import clientify_api
 from src import commissions
 from src import objectives
 from src import parrilla
@@ -1235,12 +1233,7 @@ def show_anura_activity(
     )
 
 
-def show_clientify_activity(
-    fecha_desde_sql: str,
-    fecha_hasta_sql: str,
-    zonas: tuple[str, ...],
-    title: str = "Historial Clientify",
-) -> None:
+def show_clientify_activity(title: str = "Historial Clientify") -> None:
     st.markdown(
         render_module_heading(
             title,
@@ -1251,19 +1244,14 @@ def show_clientify_activity(
         unsafe_allow_html=True,
     )
 
-    result = clientify_api.inbox_activity(fecha_desde_sql, fecha_hasta_sql, zonas)
-    if not result.enabled:
-        st.warning(result.message)
-        return
+    native_report_url = "https://new.clientify.com/reports/inbox"
+    st.info(
+        "Este modulo usa el reporte oficial de Clientify para evitar diferencias "
+        "entre Bruncas Comercial y el panel nativo."
+    )
+    st.link_button("Abrir reporte oficial de Clientify", native_report_url, use_container_width=True)
 
-    if not result.summary.get("conversaciones"):
-        st.info(result.message)
-        return
-
-    summary = result.summary
-    c1, c2 = st.columns(2)
-    c1.metric("Conversaciones", number(summary.get("conversaciones", 0)))
-    c2.metric("Promedio diario", f"{numeric_value(summary.get('promedio_diario', 0)):.1f}")
+    components.iframe(native_report_url, height=980, scrolling=True)
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
@@ -1926,7 +1914,7 @@ if pantalla_activa == "Historial Clientify":
     if not user_can_view_clientify(current_user):
         st.warning("Tu usuario no tiene habilitado este modulo.")
     else:
-        show_clientify_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Clientify")
+        show_clientify_activity("Historial Clientify")
     st.stop()
 
 if pantalla_activa == "Comisiones":
