@@ -1256,22 +1256,21 @@ def show_clientify_activity(
         st.warning(result.message)
         return
 
-    if not result.detail:
+    if not result.summary.get("conversaciones"):
         st.info(result.message)
         return
 
     summary = result.summary
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     c1.metric("Conversaciones", number(summary.get("conversaciones", 0)))
-    c2.metric("Abiertas", number(summary.get("abiertas", 0)))
-    c3.metric("Cerradas", number(summary.get("cerradas", 0)))
-    c4.metric("Usuarios activos", number(summary.get("vendedores", 0)))
+    c2.metric("Promedio diario", f"{numeric_value(summary.get('promedio_diario', 0)):.1f}")
+    c3.metric("Canales", number(summary.get("canales", 0)))
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Congeladas", number(summary.get("congeladas", 0)))
-    c6.metric("Fuente", "Inbox")
-    c7.metric("Periodo", f"{pd.to_datetime(fecha_desde_sql):%d/%m} al {pd.to_datetime(fecha_hasta_sql):%d/%m}")
-    c8.metric("Canal", "WhatsApp")
+    if summary.get("muestra_limitada"):
+        st.caption(
+            "Vista rapida: para que la consulta no se vuelva lenta, Clientify se resume con "
+            f"las primeras {number(summary.get('limite_registros', 200))} conversaciones del periodo."
+        )
 
     by_day = pd.DataFrame(result.by_day)
     if not by_day.empty:
@@ -1294,43 +1293,24 @@ def show_clientify_activity(
         )
         st.plotly_chart(fig_day, use_container_width=True)
 
-    by_owner = pd.DataFrame(result.by_owner)
-    if not by_owner.empty:
-        st.markdown("#### Rendimiento por usuario")
-        owner_view = by_owner.copy()
-        owner_view["participacion"] = owner_view["conversaciones"] / owner_view["conversaciones"].sum()
-        owner_view["participacion"] = owner_view["participacion"].map(percent)
-        st.dataframe(
-            owner_view.loc[:, ["vendedor", "conversaciones", "abiertas", "cerradas", "participacion"]],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "vendedor": "Usuario",
-                "conversaciones": "Conversaciones",
-                "abiertas": "Abiertas",
-                "cerradas": "Cerradas",
-                "participacion": "Participacion",
-            },
+    by_channel = pd.DataFrame(result.by_channel)
+    if not by_channel.empty:
+        fig_channel = px.bar(
+            by_channel.sort_values("conversaciones"),
+            x="conversaciones",
+            y="canal",
+            orientation="h",
+            text="conversaciones",
+            color_discrete_sequence=["#0f7b6c"],
         )
-
-    detail = pd.DataFrame(result.detail)
-    if not detail.empty:
-        st.markdown("#### Ultimas interacciones")
-        detail_view = detail.copy()
-        detail_view["fecha_hora"] = pd.to_datetime(detail_view["fecha_hora"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
-        st.dataframe(
-            detail_view.loc[:, ["fecha_hora", "vendedor", "cliente", "estado", "ultimo_mensaje", "canal"]].head(80),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "fecha_hora": "Fecha y hora",
-                "vendedor": "Usuario",
-                "cliente": "Cliente",
-                "estado": "Estado",
-                "ultimo_mensaje": "Ultimo mensaje",
-                "canal": "Canal",
-            },
+        fig_channel.update_traces(textposition="outside")
+        fig_channel.update_layout(
+            title="Conversaciones por canal",
+            xaxis_title="Conversaciones",
+            yaxis_title="",
+            height=max(280, 70 + 44 * len(by_channel)),
         )
+        st.plotly_chart(fig_channel, use_container_width=True)
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:

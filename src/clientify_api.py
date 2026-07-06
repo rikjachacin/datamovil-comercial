@@ -50,8 +50,7 @@ class ClientifyActivity:
     message: str
     summary: dict[str, Any]
     by_day: list[dict[str, Any]]
-    by_owner: list[dict[str, Any]]
-    detail: list[dict[str, Any]]
+    by_channel: list[dict[str, Any]]
 
 
 def _api_key() -> str | None:
@@ -198,46 +197,35 @@ def _message_direction(message: dict[str, Any]) -> str:
 @st.cache_data(ttl=300, show_spinner=False)
 def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str, ...] = ()) -> ClientifyActivity:
     if not _api_key():
-        return ClientifyActivity(False, "Falta configurar la API key de Clientify.", {}, [], [], [])
+        return ClientifyActivity(False, "Falta configurar la API key de Clientify.", {}, [], [])
 
     try:
         start_date = datetime.fromisoformat(fecha_desde_sql).date()
         end_date = datetime.fromisoformat(fecha_hasta_sql).date()
     except ValueError:
-        return ClientifyActivity(False, "Rango de fechas invalido para Clientify.", {}, [], [], [])
+        return ClientifyActivity(False, "Rango de fechas invalido para Clientify.", {}, [], [])
 
     start_dt = datetime.combine(start_date, time.min)
     end_dt = datetime.combine(end_date, time.max)
     conversations: list[dict[str, Any]] = []
+    has_more = False
 
     try:
-        for page in range(1, 11):
-            data = _request_inbox_json(
-                "conversations/",
-                {
-                    "page_size": 200,
-                    "page": page,
-                    "last_interaction__date__gte": fecha_desde_sql,
-                    "last_interaction__date__lte": fecha_hasta_sql,
-                },
-            )
-            rows = data.get("results") or []
-            if not isinstance(rows, list) or not rows:
-                break
-            stop_after_page = False
-            for row in rows:
-                last_dt = _parse_dt(row.get("last_interaction") or row.get("created"))
-                if not last_dt:
-                    continue
-                naive_last = last_dt.replace(tzinfo=None)
-                if naive_last < start_dt:
-                    stop_after_page = True
-                    continue
-                conversations.append(row)
-            if stop_after_page or not data.get("next"):
-                break
+        data = _request_inbox_json(
+            "conversations/",
+            {
+                "page_size": 50,
+                "page": 1,
+                "last_interaction__date__gte": fecha_desde_sql,
+                "last_interaction__date__lte": fecha_hasta_sql,
+            },
+        )
+        rows = data.get("results") or []
+        if isinstance(rows, list):
+            conversations.extend(rows)
+        has_more = bool(data.get("next"))
     except Exception as exc:
-        return ClientifyActivity(False, str(exc), {}, [], [], [])
+        return ClientifyActivity(False, str(exc), {}, [], [])
 
     detail: list[dict[str, Any]] = []
 
@@ -255,65 +243,42 @@ def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str,
         if not (start_dt <= naive_last <= end_dt):
             continue
 
-        contact = _contact_name(conversation.get("contact"))
         status = str(conversation.get("status") or "sin estado").lower()
-        last_message = conversation.get("last_message") if isinstance(conversation.get("last_message"), dict) else {}
-        direction = _message_direction(last_message)
         detail.append(
             {
-                "fecha_hora": last_dt.isoformat(),
                 "fecha": last_dt.date().isoformat(),
-                "hora": last_dt.hour,
-                "vendedor": owner,
-                "cliente": contact,
                 "estado": status,
-                "ultimo_mensaje": direction,
-                "canal": str(conversation.get("channel_type") or "").title(),
-                "conversacion_id": conv_id,
+                "canal": str(conversation.get("channel_type") or "Sin canal").strip().title() or "Sin canal",
             }
         )
 
-    open_count = sum(1 for row in detail if row["estado"] == "open")
-    closed_count = sum(1 for row in detail if row["estado"] == "closed")
-    frozen_count = sum(1 for row in detail if row["estado"] == "frozen")
-    owners = sorted({row["vendedor"] for row in detail})
+    total_days = max((end_date - start_date).days + 1, 1)
     summary = {
         "conversaciones": len(detail),
-        "abiertas": open_count,
-        "cerradas": closed_count,
-        "congeladas": frozen_count,
-        "vendedores": len(owners),
+        "promedio_diario": len(detail) / total_days,
+        "dias_periodo": total_days,
+        "canales": len({row["canal"] for row in detail}),
+        "muestra_limitada": has_more,
+        "limite_registros": 50,
     }
 
     by_day_map: dict[str, dict[str, Any]] = {}
-    by_owner_map: dict[str, dict[str, Any]] = {}
+    by_channel_map: dict[str, dict[str, Any]] = {}
     for row in detail:
         day = row["fecha"]
-        day_bucket = by_day_map.setdefault(day, {"fecha": day, "conversaciones": 0, "abiertas": 0, "cerradas": 0})
+        day_bucket = by_day_map.setdefault(day, {"fecha": day, "conversaciones": 0})
         day_bucket["conversaciones"] += 1
-        if row["estado"] == "open":
-            day_bucket["abiertas"] += 1
-        elif row["estado"] == "closed":
-            day_bucket["cerradas"] += 1
 
-        owner = row["vendedor"]
-        owner_bucket = by_owner_map.setdefault(
-            owner,
-            {"vendedor": owner, "conversaciones": 0, "abiertas": 0, "cerradas": 0},
-        )
-        owner_bucket["conversaciones"] += 1
-        if row["estado"] == "open":
-            owner_bucket["abiertas"] += 1
-        elif row["estado"] == "closed":
-            owner_bucket["cerradas"] += 1
+        channel = row["canal"]
+        channel_bucket = by_channel_map.setdefault(channel, {"canal": channel, "conversaciones": 0})
+        channel_bucket["conversaciones"] += 1
 
     return ClientifyActivity(
         True,
         "OK" if detail else "No hay conversaciones de Clientify en el periodo seleccionado.",
         summary,
         sorted(by_day_map.values(), key=lambda row: row["fecha"]),
-        sorted(by_owner_map.values(), key=lambda row: row["conversaciones"], reverse=True),
-        sorted(detail, key=lambda row: row["fecha_hora"], reverse=True),
+        sorted(by_channel_map.values(), key=lambda row: row["conversaciones"], reverse=True),
     )
 
 
