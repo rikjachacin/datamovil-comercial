@@ -47,6 +47,15 @@ SALES_ZONE_OVERRIDES = (
         "id_facturacion": "281509",
         "invoice_numbers": ("98682", "225914"),
     },
+    {
+        "date": "2026-07-08",
+        "client": "MUNICIPALIDAD BERAZATEGUI",
+        "client_id": "109186",
+        "source_zone": "LUCIA MORENO",
+        "target_zone": "DAVID",
+        "id_facturacion": "",
+        "invoice_numbers": ("229687",),
+    },
 )
 
 
@@ -157,10 +166,15 @@ def _sales_zone_expr(alias: str) -> str:
     cases = []
     for override in SALES_ZONE_OVERRIDES:
         invoice_numbers = ", ".join(f"'{number}'" for number in override["invoice_numbers"])
+        client_condition = f"UPPER(LTRIM(RTRIM(COALESCE({alias}.cliente, '')))) = '{override['client']}'"
+        if override.get("client_id"):
+            client_condition = (
+                f"({client_condition} OR CAST({alias}.id_cliente AS varchar(50)) = '{override['client_id']}')"
+            )
         cases.append(
             "WHEN "
             f"CAST({alias}.fecha AS date) = '{override['date']}' "
-            f"AND UPPER(LTRIM(RTRIM(COALESCE({alias}.cliente, '')))) = '{override['client']}' "
+            f"AND {client_condition} "
             f"AND {base_zone} = '{override['source_zone']}' "
             f"AND (CAST({alias}.id_facturacion AS varchar(50)) = '{override['id_facturacion']}' "
             f"OR CAST({alias}.numero AS varchar(50)) IN ({invoice_numbers})) "
@@ -184,7 +198,10 @@ def _apply_sales_zone_overrides(df: pd.DataFrame) -> pd.DataFrame:
             mask &= pd.to_datetime(out["fecha"], errors="coerce").dt.date == pd.to_datetime(override["date"]).date()
         if "cliente" in out.columns:
             clients = out["cliente"].map(_normalize_match_text)
-            mask &= clients == override["client"]
+            client_mask = clients == override["client"]
+            if override.get("client_id") and "id_cliente" in out.columns:
+                client_mask |= out["id_cliente"].astype(str).str.strip().eq(str(override["client_id"]))
+            mask &= client_mask
         if "zona" in out.columns:
             zones = out["zona"].map(_normalize_match_text)
             mask &= zones == override["source_zone"]
