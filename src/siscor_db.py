@@ -49,12 +49,12 @@ SALES_ZONE_OVERRIDES = (
     },
     {
         "date": "2026-07-08",
-        "client": "MUNICIPALIDAD BERAZATEGUI",
+        "client": "MUNICIPALIDAD DE BERAZATEGUI",
         "client_id": "109186",
         "source_zone": "LUCIA MORENO",
         "target_zone": "DAVID",
         "id_facturacion": "",
-        "invoice_numbers": ("229687",),
+        "invoice_numbers": ("229687", "75438", "22882"),
     },
 )
 
