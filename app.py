@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 
 from src import auth
 from src import anura_api
+from src import clientify_api
 from src import commissions
 from src import objectives
 from src import parrilla
@@ -1233,25 +1234,51 @@ def show_anura_activity(
     )
 
 
-def show_clientify_activity(title: str = "Historial Clientify") -> None:
+def show_clientify_activity(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zones: tuple[str, ...],
+    title: str = "Historial Clientify",
+) -> None:
     st.markdown(
         render_module_heading(
             title,
-            "Conversaciones y rendimiento de respuesta en Clientify",
+            "Conversaciones, clientes y mensajes de WhatsApp",
             "detail",
             "C",
         ),
         unsafe_allow_html=True,
     )
 
-    native_report_url = "https://new.clientify.com/reports/inbox"
-    st.info(
-        "Este modulo usa el reporte oficial de Clientify para evitar diferencias "
-        "entre Bruncas Comercial y el panel nativo."
-    )
-    st.link_button("Abrir reporte oficial de Clientify", native_report_url, use_container_width=True)
+    with st.spinner("Leyendo conversaciones de WhatsApp..."):
+        activity = clientify_api.inbox_activity(fecha_desde_sql, fecha_hasta_sql, zones)
+    if not activity.enabled:
+        st.warning(activity.message)
+        return
 
-    components.iframe(native_report_url, height=980, scrolling=True)
+    summary = activity.summary
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("Conversaciones", int(summary.get("conversaciones", 0)))
+    metric_cols[1].metric("Clientes", int(summary.get("clientes", 0)))
+    metric_cols[2].metric("Mensajes de texto", int(summary.get("mensajes_texto", 0)))
+    st.caption(
+        "KPI propio: chats de WhatsApp con mensajes escritos durante el periodo. "
+        "No incluye estados automaticos, archivos, imagenes ni mensajes de bots."
+    )
+
+    if activity.by_owner and len(activity.by_owner) > 1:
+        st.subheader("Detalle por telemarketer")
+        st.dataframe(
+            pd.DataFrame(activity.by_owner),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "telemarketer": "Telemarketer",
+                "conversaciones": "Conversaciones",
+                "clientes": "Clientes",
+                "mensajes_texto": "Mensajes de texto",
+            },
+        )
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
@@ -1914,7 +1941,7 @@ if pantalla_activa == "Historial Clientify":
     if not user_can_view_clientify(current_user):
         st.warning("Tu usuario no tiene habilitado este modulo.")
     else:
-        show_clientify_activity("Historial Clientify")
+        show_clientify_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Clientify")
     st.stop()
 
 if pantalla_activa == "Comisiones":

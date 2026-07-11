@@ -10,6 +10,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
@@ -52,7 +53,7 @@ class ClientifyActivity:
     message: str
     summary: dict[str, Any]
     by_day: list[dict[str, Any]]
-    by_channel: list[dict[str, Any]]
+    by_owner: list[dict[str, Any]]
 
 
 def _api_key() -> str | None:
@@ -239,6 +240,105 @@ def _message_direction(message: dict[str, Any]) -> str:
     return "enviado"
 
 
+LOCAL_TIMEZONE = ZoneInfo("America/Buenos_Aires")
+
+
+def _local_dt(value: object) -> datetime | None:
+    parsed = _parse_dt(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=LOCAL_TIMEZONE)
+    return parsed.astimezone(LOCAL_TIMEZONE)
+
+
+def _owner_id(value: object) -> int | None:
+    if isinstance(value, dict):
+        value = value.get("id")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_text_message(message: dict[str, Any]) -> bool:
+    message_type = str(message.get("type") or "").lower()
+    text = str(message.get("text") or "").strip()
+    return (
+        message_type in {"incoming", "outgoing"}
+        and bool(text)
+        and not message.get("media")
+        and not message.get("sent_by_bot")
+    )
+
+
+def _fetch_conversation_pages(start_dt: datetime, end_dt: datetime) -> list[dict[str, Any]]:
+    conversations: dict[int, dict[str, Any]] = {}
+    for first_page in range(1, 51, 5):
+        batch_dates: list[datetime] = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [
+                executor.submit(
+                    _request_inbox_json,
+                    "conversations/",
+                    {"page": page, "page_size": 100},
+                )
+                for page in range(first_page, first_page + 5)
+            ]
+            for future in as_completed(futures):
+                payload = future.result()
+                rows = payload.get("results") or []
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    conversation_id = row.get("id")
+                    if isinstance(conversation_id, int):
+                        conversations[conversation_id] = row
+                    interaction_dt = _local_dt(row.get("last_interaction"))
+                    if interaction_dt:
+                        batch_dates.append(interaction_dt)
+        if batch_dates and max(batch_dates) < start_dt:
+            break
+
+    return [
+        row
+        for row in conversations.values()
+        if str(row.get("channel_type") or "").lower() == "whatsapp"
+        and (interaction_dt := _local_dt(row.get("last_interaction"))) is not None
+        and interaction_dt >= start_dt
+    ]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_messages_in_period(
+    conversation_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for page in range(1, 51):
+        payload = _request_inbox_json(
+            f"conversations/{conversation_id}/messages/",
+            {"page": page, "page_size": 100},
+        )
+        rows = [row for row in (payload.get("results") or []) if isinstance(row, dict)]
+        if not rows:
+            break
+        page_dates: list[datetime] = []
+        for message in rows:
+            created_dt = _local_dt(message.get("created"))
+            if not created_dt:
+                continue
+            page_dates.append(created_dt)
+            if start_dt <= created_dt <= end_dt and _is_text_message(message):
+                selected.append(message)
+        if page_dates and max(page_dates) < start_dt:
+            break
+        if not payload.get("next"):
+            break
+    return selected
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str, ...] = ()) -> ClientifyActivity:
     try:
@@ -247,96 +347,82 @@ def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str,
     except ValueError:
         return ClientifyActivity(False, "Rango de fechas invalido para Clientify.", {}, [], [])
 
-    metric_params = {
-        "date_start": fecha_desde_sql,
-        "date_end": fecha_hasta_sql,
-        "time_zone": "America/Buenos_Aires",
-        "compare_with_previous": "true",
-    }
     total_days = max((end_date - start_date).days + 1, 1)
-    if _inbox_bearer_token():
-        try:
-            summary_data = _request_metric_json("dashboard/summary/", metric_params)
-            daily_data = _request_metric_json("dashboard/timeseries/", {**metric_params, "series": "daily"})
-            current = summary_data.get("current") if isinstance(summary_data.get("current"), dict) else summary_data
-            total_conversations = int(current.get("total_conversations") or 0)
-            daily_rows = daily_data.get("buckets") or daily_data.get("items") or daily_data.get("series") or []
-            by_day = []
-            for row in daily_rows:
-                if not isinstance(row, dict):
-                    continue
-                day = row.get("day") or row.get("date")
-                if not day:
-                    continue
-                by_day.append({"fecha": str(day), "conversaciones": int(row.get("count") or row.get("value") or 0)})
-            return ClientifyActivity(
-                True,
-                "OK" if total_conversations else "No hay conversaciones de Clientify en el periodo seleccionado.",
-                {
-                    "conversaciones": total_conversations,
-                    "promedio_diario": total_conversations / total_days,
-                    "dias_periodo": total_days,
-                    "fuente": "metricas",
-                },
-                sorted(by_day, key=lambda row: row["fecha"]),
-                [],
-            )
-        except Exception:
-            pass
-
-    start_dt = datetime.combine(start_date, time.min)
-    end_dt = datetime.combine(end_date, time.max)
+    start_dt = datetime.combine(start_date, time.min, tzinfo=LOCAL_TIMEZONE)
+    end_dt = datetime.combine(end_date, time.max, tzinfo=LOCAL_TIMEZONE)
     try:
-        base_params = {
-            "page_size": 100,
-            "last_interaction__date__gte": fecha_desde_sql,
-            "last_interaction__date__lte": fecha_hasta_sql,
-        }
-        pages: list[dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [
-                executor.submit(_request_inbox_json, "conversations/", {**base_params, "page": page})
-                for page in range(1, 6)
-            ]
+        candidates = [
+            row
+            for row in _fetch_conversation_pages(start_dt, end_dt)
+            if _owner_matches_zones(_owner_name(row.get("owner")), zones)
+        ]
+        messages_by_conversation: dict[int, list[dict[str, Any]]] = {}
+        with ThreadPoolExecutor(max_workers=40) as executor:
+            futures = {
+                executor.submit(_fetch_messages_in_period, row["id"], start_dt, end_dt): row
+                for row in candidates
+            }
             for future in as_completed(futures):
-                pages.append(future.result())
+                row = futures[future]
+                messages_by_conversation[row["id"]] = future.result()
     except Exception as exc:
         return ClientifyActivity(False, str(exc), {}, [], [])
 
-    rows: list[dict[str, Any]] = []
-    for page in pages:
-        page_rows = page.get("results") or []
-        if isinstance(page_rows, list):
-            rows.extend(row for row in page_rows if isinstance(row, dict))
-    by_day = []
-    by_day_map: dict[str, int] = {}
-    for row in rows if isinstance(rows, list) else []:
+    active_conversations: set[int] = set()
+    unique_contacts: set[str] = set()
+    by_day_map: dict[str, set[int]] = {}
+    by_owner_map: dict[str, dict[str, Any]] = {}
+    total_text_messages = 0
+    for row in candidates:
+        conversation_id = row["id"]
+        messages = messages_by_conversation.get(conversation_id, [])
+        if not messages:
+            continue
         owner = _owner_name(row.get("owner"))
-        if not _owner_matches_zones(owner, zones):
-            continue
-        last_dt = _parse_dt(row.get("last_interaction") or row.get("created"))
-        if not last_dt:
-            continue
-        naive_last = last_dt.replace(tzinfo=None)
-        if not (start_dt <= naive_last <= end_dt):
-            continue
-        day = last_dt.date().isoformat()
-        by_day_map[day] = by_day_map.get(day, 0) + 1
+        contact = row.get("contact") if isinstance(row.get("contact"), dict) else {}
+        contact_key = str(contact.get("id") or row.get("source_id") or conversation_id)
+        active_conversations.add(conversation_id)
+        unique_contacts.add(contact_key)
+        total_text_messages += len(messages)
+        owner_row = by_owner_map.setdefault(
+            owner,
+            {"telemarketer": owner, "conversaciones": set(), "clientes": set(), "mensajes_texto": 0},
+        )
+        owner_row["conversaciones"].add(conversation_id)
+        owner_row["clientes"].add(contact_key)
+        owner_row["mensajes_texto"] += len(messages)
+        for message in messages:
+            created_dt = _local_dt(message.get("created"))
+            if created_dt:
+                by_day_map.setdefault(created_dt.date().isoformat(), set()).add(conversation_id)
 
-    total_conversations = sum(by_day_map.values())
-    by_day = [{"fecha": day, "conversaciones": value} for day, value in by_day_map.items()]
+    total_conversations = len(active_conversations)
+    by_day = [
+        {"fecha": day, "conversaciones": len(conversation_ids)}
+        for day, conversation_ids in by_day_map.items()
+    ]
+    by_owner = [
+        {
+            "telemarketer": row["telemarketer"],
+            "conversaciones": len(row["conversaciones"]),
+            "clientes": len(row["clientes"]),
+            "mensajes_texto": row["mensajes_texto"],
+        }
+        for row in by_owner_map.values()
+    ]
 
     return ClientifyActivity(
         True,
         "OK" if total_conversations else "No hay conversaciones de Clientify en el periodo seleccionado.",
         {
             "conversaciones": total_conversations,
-            "promedio_diario": total_conversations / total_days,
+            "clientes": len(unique_contacts),
+            "mensajes_texto": total_text_messages,
             "dias_periodo": total_days,
-            "fuente": "api_publica",
+            "fuente": "api_publica_whatsapp",
         },
         sorted(by_day, key=lambda row: row["fecha"]),
-        [],
+        sorted(by_owner, key=lambda row: (-row["conversaciones"], row["telemarketer"])),
     )
 
 
