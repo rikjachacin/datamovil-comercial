@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -28,7 +30,10 @@ API_BASE_URL = "https://api.clientify.com/v1"
 INBOX_API_BASE_URL = "https://api.clientify.com/team-inbox/api"
 CLIENTIFY_PLUS_BASE_URL = "https://plus.clientify.com/team-inbox/api/metrics"
 ENCRYPTED_KEY_PATH = Path("data/clientify_api_key.enc")
+ACTIVITY_CACHE_PATH = Path("data/clientify_activity.sqlite3")
 REQUEST_TIMEOUT_SECONDS = 25
+ACTIVITY_REFRESH_MINUTES = 5
+_ACTIVITY_CACHE_LOCK = threading.Lock()
 
 CONVERSATIONS_REPORT = {
     "type": "rendimiento_conversaciones",
@@ -339,67 +344,220 @@ def _fetch_messages_in_period(
     return selected
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str, ...] = ()) -> ClientifyActivity:
-    try:
-        start_date = datetime.fromisoformat(fecha_desde_sql).date()
-        end_date = datetime.fromisoformat(fecha_hasta_sql).date()
-    except ValueError:
-        return ClientifyActivity(False, "Rango de fechas invalido para Clientify.", {}, [], [])
+def _canonical_scopes(zones: tuple[str, ...]) -> tuple[str, ...]:
+    scopes: set[str] = set()
+    for zone in zones:
+        normalized = _normalize_text(zone).strip()
+        if "DAVID" in normalized:
+            scopes.add("DAVID")
+        elif "NOELIA" in normalized:
+            scopes.add("NOELIA")
+        elif "MICAELA" in normalized:
+            scopes.add("MICAELA GONZALEZ")
+        elif any(token in normalized for token in ("MACA", "MACARENA", "PROTTO")):
+            scopes.add("MACA PROTTO")
+        elif "LUCIA" in normalized:
+            scopes.add("LUCIA MORENO")
+    return tuple(sorted(scopes))
 
-    total_days = max((end_date - start_date).days + 1, 1)
-    start_dt = datetime.combine(start_date, time.min, tzinfo=LOCAL_TIMEZONE)
-    end_dt = datetime.combine(end_date, time.max, tzinfo=LOCAL_TIMEZONE)
-    try:
-        candidates = [
-            row
-            for row in _fetch_conversation_pages(start_dt, end_dt)
-            if _owner_matches_zones(_owner_name(row.get("owner")), zones)
-        ]
-        messages_by_conversation: dict[int, list[dict[str, Any]]] = {}
-        with ThreadPoolExecutor(max_workers=40) as executor:
-            futures = {
-                executor.submit(_fetch_messages_in_period, row["id"], start_dt, end_dt): row
-                for row in candidates
-            }
-            for future in as_completed(futures):
-                row = futures[future]
-                messages_by_conversation[row["id"]] = future.result()
-    except Exception as exc:
-        return ClientifyActivity(False, str(exc), {}, [], [])
 
-    active_conversations: set[int] = set()
-    unique_contacts: set[str] = set()
+def _cache_connection() -> sqlite3.Connection:
+    ACTIVITY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(ACTIVITY_CACHE_PATH, timeout=30)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=30000")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS text_messages (
+            message_id INTEGER PRIMARY KEY,
+            conversation_id INTEGER NOT NULL,
+            contact_key TEXT NOT NULL,
+            owner_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            day TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clientify_messages_day ON text_messages(day)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clientify_messages_owner ON text_messages(owner_name)"
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sync_coverage (
+            scope TEXT PRIMARY KEY,
+            start_date TEXT NOT NULL,
+            last_sync TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+    return connection
+
+
+def _coverage_rows(connection: sqlite3.Connection) -> dict[str, tuple[datetime, datetime]]:
+    rows = connection.execute(
+        "SELECT scope, start_date, last_sync FROM sync_coverage"
+    ).fetchall()
+    coverage: dict[str, tuple[datetime, datetime]] = {}
+    for scope, start_value, sync_value in rows:
+        start_dt = datetime.fromisoformat(str(start_value)).replace(tzinfo=LOCAL_TIMEZONE)
+        sync_dt = datetime.fromisoformat(str(sync_value))
+        if sync_dt.tzinfo is None:
+            sync_dt = sync_dt.replace(tzinfo=LOCAL_TIMEZONE)
+        else:
+            sync_dt = sync_dt.astimezone(LOCAL_TIMEZONE)
+        coverage[str(scope)] = (start_dt, sync_dt)
+    return coverage
+
+
+def _sync_activity_cache(start_date: datetime, scopes: tuple[str, ...]) -> None:
+    if not scopes:
+        return
+    now = datetime.now(LOCAL_TIMEZONE)
+    with _ACTIVITY_CACHE_LOCK:
+        connection = _cache_connection()
+        try:
+            coverage = _coverage_rows(connection)
+            scan_starts: dict[str, datetime] = {}
+            bootstrap_scopes: set[str] = set()
+            for scope in scopes:
+                stored = coverage.get(scope)
+                if stored is None or start_date < stored[0]:
+                    scan_starts[scope] = start_date
+                    bootstrap_scopes.add(scope)
+                elif now - stored[1] >= timedelta(minutes=ACTIVITY_REFRESH_MINUTES):
+                    scan_starts[scope] = max(stored[1] - timedelta(minutes=1), stored[0])
+            if not scan_starts:
+                return
+
+            global_start = min(scan_starts.values())
+            conversations = _fetch_conversation_pages(global_start, now)
+            candidates: dict[int, tuple[dict[str, Any], datetime]] = {}
+            for row in conversations:
+                interaction_dt = _local_dt(row.get("last_interaction"))
+                owner = _owner_name(row.get("owner"))
+                matching_starts = [
+                    scope_start
+                    for scope, scope_start in scan_starts.items()
+                    if interaction_dt is not None
+                    and interaction_dt >= scope_start
+                    and _owner_matches_zones(owner, (scope,))
+                ]
+                if matching_starts:
+                    candidates[row["id"]] = (row, min(matching_starts))
+
+            messages_by_conversation: dict[int, list[dict[str, Any]]] = {}
+            with ThreadPoolExecutor(max_workers=40) as executor:
+                futures = {
+                    executor.submit(
+                        _fetch_messages_in_period,
+                        conversation_id,
+                        conversation_start,
+                        now,
+                    ): conversation_id
+                    for conversation_id, (_, conversation_start) in candidates.items()
+                }
+                for future in as_completed(futures):
+                    messages_by_conversation[futures[future]] = future.result()
+
+            for conversation_id, (row, _) in candidates.items():
+                owner = _owner_name(row.get("owner"))
+                contact = row.get("contact") if isinstance(row.get("contact"), dict) else {}
+                contact_key = str(contact.get("id") or row.get("source_id") or conversation_id)
+                connection.execute(
+                    "UPDATE text_messages SET owner_name = ?, contact_key = ? WHERE conversation_id = ?",
+                    (owner, contact_key, conversation_id),
+                )
+                for message in messages_by_conversation.get(conversation_id, []):
+                    message_id = message.get("id")
+                    created_dt = _local_dt(message.get("created"))
+                    if not isinstance(message_id, int) or created_dt is None:
+                        continue
+                    connection.execute(
+                        """
+                        INSERT INTO text_messages (
+                            message_id, conversation_id, contact_key, owner_name, created_at, day
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(message_id) DO UPDATE SET
+                            conversation_id = excluded.conversation_id,
+                            contact_key = excluded.contact_key,
+                            owner_name = excluded.owner_name,
+                            created_at = excluded.created_at,
+                            day = excluded.day
+                        """,
+                        (
+                            message_id,
+                            conversation_id,
+                            contact_key,
+                            owner,
+                            created_dt.isoformat(),
+                            created_dt.date().isoformat(),
+                        ),
+                    )
+
+            for scope, scan_start in scan_starts.items():
+                stored = coverage.get(scope)
+                coverage_start = min(stored[0], start_date) if stored else start_date
+                if scope not in bootstrap_scopes and stored:
+                    coverage_start = stored[0]
+                connection.execute(
+                    """
+                    INSERT INTO sync_coverage (scope, start_date, last_sync)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(scope) DO UPDATE SET
+                        start_date = excluded.start_date,
+                        last_sync = excluded.last_sync
+                    """,
+                    (scope, coverage_start.date().isoformat(), now.isoformat()),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+
+def _activity_from_cache(
+    start_date: datetime,
+    end_date: datetime,
+    scopes: tuple[str, ...],
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    connection = _cache_connection()
+    try:
+        rows = connection.execute(
+            """
+            SELECT message_id, conversation_id, contact_key, owner_name, day
+            FROM text_messages
+            WHERE day BETWEEN ? AND ?
+            """,
+            (start_date.date().isoformat(), end_date.date().isoformat()),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    filtered_rows = [
+        row
+        for row in rows
+        if any(_owner_matches_zones(str(row[3]), (scope,)) for scope in scopes)
+    ]
+    conversations = {int(row[1]) for row in filtered_rows}
+    contacts = {str(row[2]) for row in filtered_rows}
     by_day_map: dict[str, set[int]] = {}
     by_owner_map: dict[str, dict[str, Any]] = {}
-    total_text_messages = 0
-    for row in candidates:
-        conversation_id = row["id"]
-        messages = messages_by_conversation.get(conversation_id, [])
-        if not messages:
-            continue
-        owner = _owner_name(row.get("owner"))
-        contact = row.get("contact") if isinstance(row.get("contact"), dict) else {}
-        contact_key = str(contact.get("id") or row.get("source_id") or conversation_id)
-        active_conversations.add(conversation_id)
-        unique_contacts.add(contact_key)
-        total_text_messages += len(messages)
+    for _, conversation_id, contact_key, owner, day in filtered_rows:
+        by_day_map.setdefault(str(day), set()).add(int(conversation_id))
         owner_row = by_owner_map.setdefault(
-            owner,
-            {"telemarketer": owner, "conversaciones": set(), "clientes": set(), "mensajes_texto": 0},
+            str(owner),
+            {"telemarketer": str(owner), "conversaciones": set(), "clientes": set(), "mensajes_texto": 0},
         )
-        owner_row["conversaciones"].add(conversation_id)
-        owner_row["clientes"].add(contact_key)
-        owner_row["mensajes_texto"] += len(messages)
-        for message in messages:
-            created_dt = _local_dt(message.get("created"))
-            if created_dt:
-                by_day_map.setdefault(created_dt.date().isoformat(), set()).add(conversation_id)
+        owner_row["conversaciones"].add(int(conversation_id))
+        owner_row["clientes"].add(str(contact_key))
+        owner_row["mensajes_texto"] += 1
 
-    total_conversations = len(active_conversations)
     by_day = [
         {"fecha": day, "conversaciones": len(conversation_ids)}
-        for day, conversation_ids in by_day_map.items()
+        for day, conversation_ids in sorted(by_day_map.items())
     ]
     by_owner = [
         {
@@ -410,19 +568,52 @@ def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str,
         }
         for row in by_owner_map.values()
     ]
+    summary = {
+        "conversaciones": len(conversations),
+        "clientes": len(contacts),
+        "mensajes_texto": len(filtered_rows),
+        "fuente": "cache_incremental_clientify",
+    }
+    return summary, by_day, sorted(
+        by_owner,
+        key=lambda row: (-row["conversaciones"], row["telemarketer"]),
+    )
+
+
+def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str, ...] = ()) -> ClientifyActivity:
+    try:
+        start_date = datetime.fromisoformat(fecha_desde_sql).date()
+        end_date = datetime.fromisoformat(fecha_hasta_sql).date()
+    except ValueError:
+        return ClientifyActivity(False, "Rango de fechas invalido para Clientify.", {}, [], [])
+
+    total_days = max((end_date - start_date).days + 1, 1)
+    start_dt = datetime.combine(start_date, time.min, tzinfo=LOCAL_TIMEZONE)
+    end_dt = datetime.combine(end_date, time.max, tzinfo=LOCAL_TIMEZONE)
+    scopes = _canonical_scopes(zones)
+    if not scopes:
+        return ClientifyActivity(
+            True,
+            "No hay telemarketers seleccionados para Clientify.",
+            {"conversaciones": 0, "clientes": 0, "mensajes_texto": 0, "dias_periodo": total_days},
+            [],
+            [],
+        )
+    try:
+        _sync_activity_cache(start_dt, scopes)
+        summary, by_day, by_owner = _activity_from_cache(start_dt, end_dt, scopes)
+    except Exception as exc:
+        return ClientifyActivity(False, str(exc), {}, [], [])
+
+    summary["dias_periodo"] = total_days
+    total_conversations = int(summary.get("conversaciones", 0))
 
     return ClientifyActivity(
         True,
         "OK" if total_conversations else "No hay conversaciones de Clientify en el periodo seleccionado.",
-        {
-            "conversaciones": total_conversations,
-            "clientes": len(unique_contacts),
-            "mensajes_texto": total_text_messages,
-            "dias_periodo": total_days,
-            "fuente": "api_publica_whatsapp",
-        },
-        sorted(by_day, key=lambda row: row["fecha"]),
-        sorted(by_owner, key=lambda row: (-row["conversaciones"], row["telemarketer"])),
+        summary,
+        by_day,
+        by_owner,
     )
 
 

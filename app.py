@@ -1250,7 +1250,11 @@ def show_clientify_activity(
         unsafe_allow_html=True,
     )
 
-    with st.spinner("Leyendo conversaciones de WhatsApp..."):
+    st.caption(
+        "La primera carga de un periodo puede demorar. Luego se actualizan solo "
+        "las conversaciones nuevas o modificadas."
+    )
+    with st.spinner("Actualizando actividad de WhatsApp..."):
         activity = clientify_api.inbox_activity(fecha_desde_sql, fecha_hasta_sql, zones)
     if not activity.enabled:
         st.warning(activity.message)
