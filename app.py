@@ -23,7 +23,7 @@ from src import siscor_db
 
 
 APP_NAME = "Bruncas Comercial"
-APP_BUILD = "2026-06-16.1418"
+APP_BUILD = "2026-07-13.1105"
 LOGO_PATH = Path("assets/bruncas_logo.png")
 
 
@@ -1285,6 +1285,65 @@ def show_clientify_activity(
         )
 
 
+def load_overdue_portfolio(zones: tuple[str, ...]) -> pd.DataFrame:
+    portfolio = siscor_db.cartera_vencida(zones, dias_minimos=30).copy()
+    if portfolio.empty:
+        return portfolio
+    portfolio["importe_vencido"] = pd.to_numeric(
+        portfolio["importe_vencido"], errors="coerce"
+    ).fillna(0)
+    portfolio["dias_mora"] = pd.to_numeric(portfolio["dias_mora"], errors="coerce").fillna(0)
+    return portfolio.sort_values(["dias_mora", "importe_vencido"], ascending=[False, False])
+
+
+def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
+    st.markdown(
+        render_module_heading(
+            "Cartera vencida",
+            "Clientes con documentos vencidos hace mas de 30 dias",
+            "credit",
+            "!",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.caption("Saldos actuales al dia de hoy. La consulta es de solo lectura sobre SisCor.")
+
+    portfolio = load_overdue_portfolio(zones)
+    if portfolio.empty:
+        st.success("No hay clientes con deuda vencida mayor a 30 dias para las zonas seleccionadas.")
+        return
+
+    total_debt = float(portfolio["importe_vencido"].sum())
+    max_days = int(portfolio["dias_mora"].max())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Clientes con deuda > 30 dias", number(len(portfolio)))
+    c2.metric("Importe vencido > 30 dias", money(total_debt))
+    c3.metric("Mayor mora", f"{max_days} dias")
+
+    table = portfolio.copy()
+    table["vencimiento_mas_antiguo"] = pd.to_datetime(
+        table["vencimiento_mas_antiguo"], errors="coerce"
+    )
+    table["ultima_compra"] = pd.to_datetime(table["ultima_compra"], errors="coerce")
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        height=470,
+        column_config={
+            "cliente": "Cliente",
+            "zona": "Zona",
+            "importe_vencido": st.column_config.NumberColumn("Deuda > 30 dias", format="$ %.0f"),
+            "dias_mora": st.column_config.NumberColumn("Dias de mora", format="%d"),
+            "documento_mas_antiguo": "Documento mas antiguo",
+            "vencimiento_mas_antiguo": st.column_config.DateColumn(
+                "Vencimiento mas antiguo", format="DD/MM/YYYY"
+            ),
+            "ultima_compra": st.column_config.DateColumn("Ultima compra", format="DD/MM/YYYY"),
+        },
+    )
+
+
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
     st.markdown(
         render_module_heading(
@@ -1834,6 +1893,9 @@ with st.sidebar:
     with st.container(key="dm_nav_anura"):
         if st.button("Historial Anura", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Anura"
+    with st.container(key="dm_nav_overdue"):
+        if st.button("Cartera vencida", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Cartera vencida"
     if user_can_view_clientify(current_user):
         with st.container(key="dm_nav_clientify"):
             if st.button("Historial Clientify", use_container_width=True):
@@ -1939,6 +2001,10 @@ if pantalla_activa == "Historial Persat":
 
 if pantalla_activa == "Historial Anura":
     show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
+    st.stop()
+
+if pantalla_activa == "Cartera vencida":
+    show_overdue_portfolio(zonas_filtro)
     st.stop()
 
 if pantalla_activa == "Historial Clientify":
@@ -2403,6 +2469,17 @@ m1.metric("Ventas", money(kpi_df["total"]))
 m2.metric("Comprobantes", number(kpi_df["comprobantes"]))
 m3.metric("Clientes", number(kpi_df["clientes"]))
 m4.metric("Ticket promedio", money(kpi_df["ticket_promedio"]))
+
+try:
+    overdue_summary = load_overdue_portfolio(zonas_filtro)
+    overdue_clients = len(overdue_summary)
+    overdue_total = float(overdue_summary["importe_vencido"].sum()) if not overdue_summary.empty else 0.0
+    st.markdown("#### Resumen de cartera vencida")
+    od1, od2 = st.columns(2)
+    od1.metric("Clientes con deuda > 30 dias", number(overdue_clients))
+    od2.metric("Importe vencido > 30 dias", money(overdue_total))
+except Exception as exc:
+    st.warning("No pude actualizar el resumen de cartera vencida en este momento.")
 
 st.divider()
 

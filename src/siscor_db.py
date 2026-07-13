@@ -1336,6 +1336,134 @@ def cliente_credito(
     return _credit_profile_from_raw(profile, meses_venta).loc[:, columns]
 
 
+def cartera_vencida(
+    zonas_filtro: tuple[str, ...] = (),
+    dias_minimos: int = 30,
+) -> pd.DataFrame:
+    """Return current overdue balances without modifying SisCor data."""
+    columns = [
+        "cliente",
+        "zona",
+        "importe_vencido",
+        "dias_mora",
+        "documento_mas_antiguo",
+        "vencimiento_mas_antiguo",
+        "ultima_compra",
+    ]
+
+    if data_mode() == "snapshot":
+        creditos = _snapshot_creditos().copy()
+        if creditos.empty:
+            return pd.DataFrame(columns=columns)
+
+        creditos["dias_deuda"] = pd.to_numeric(creditos["dias_deuda"], errors="coerce").fillna(0)
+        creditos["saldo_vencido"] = pd.to_numeric(
+            creditos["saldo_vencido"], errors="coerce"
+        ).fillna(0)
+        creditos = creditos[
+            (creditos["dias_deuda"] > dias_minimos) & (creditos["saldo_vencido"] > 0)
+        ].copy()
+        if zonas_filtro:
+            creditos = creditos[creditos["zona"].isin(zonas_filtro)]
+        if creditos.empty:
+            return pd.DataFrame(columns=columns)
+
+        facturas = _snapshot_filtered_facturas(zonas_filtro=zonas_filtro)
+        ultimas = (
+            facturas.groupby("cliente", as_index=False)["fecha"].max().rename(columns={"fecha": "ultima_compra"})
+            if not facturas.empty
+            else pd.DataFrame(columns=["cliente", "ultima_compra"])
+        )
+        result = creditos.loc[:, ["cliente", "zona", "saldo_vencido", "dias_deuda"]].rename(
+            columns={"saldo_vencido": "importe_vencido", "dias_deuda": "dias_mora"}
+        )
+        result = result.merge(ultimas, on="cliente", how="left")
+        result["documento_mas_antiguo"] = "Sin detalle en snapshot"
+        result["vencimiento_mas_antiguo"] = pd.NaT
+        return result.loc[:, columns].sort_values(
+            ["dias_mora", "importe_vencido"], ascending=[False, False]
+        )
+
+    dias_minimos = max(int(dias_minimos), 0)
+    signed_balance = _signed_balance("f", "saldo")
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH clientes AS (
+            SELECT
+                c.id_cliente,
+                MAX(COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente))) AS cliente,
+                MAX(COALESCE(NULLIF(z.descripcion, ''), 'Sin zona')) AS zona
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+              AND COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') NOT IN ('PROVEEDORES')
+              {zona_sql}
+            GROUP BY c.id_cliente
+        ),
+        deuda_documentos AS (
+            SELECT
+                f.id_cliente,
+                {signed_balance} AS saldo_firmado,
+                CAST(COALESCE(f.fecha_vencimiento, f.fecha) AS date) AS fecha_vencimiento,
+                DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE()) AS dias_mora,
+                CONCAT(f.tipo, ' ', CAST(f.numero AS varchar(50))) AS documento,
+                ROW_NUMBER() OVER (
+                    PARTITION BY f.id_cliente
+                    ORDER BY COALESCE(f.fecha_vencimiento, f.fecha), f.id_facturacion
+                ) AS orden_antiguedad
+            FROM dbo.cli_factura f
+            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.saldo <> 0
+              AND DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE()) > ?
+              {_commercial_zone_filter("f")}
+              {_balance_document_filter("f")}
+        ),
+        deuda AS (
+            SELECT
+                id_cliente,
+                SUM(saldo_firmado) AS importe_vencido,
+                MAX(dias_mora) AS dias_mora,
+                MAX(CASE WHEN orden_antiguedad = 1 THEN documento END) AS documento_mas_antiguo,
+                MIN(fecha_vencimiento) AS vencimiento_mas_antiguo
+            FROM deuda_documentos
+            GROUP BY id_cliente
+            HAVING SUM(saldo_firmado) > 0
+        ),
+        compras AS (
+            SELECT
+                f.id_cliente,
+                MAX(CAST(f.fecha AS date)) AS ultima_compra
+            FROM dbo.cli_factura f
+            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              {_commercial_zone_filter("f")}
+              {_credit_document_filter("f")}
+            GROUP BY f.id_cliente
+        )
+        SELECT
+            c.cliente,
+            c.zona,
+            d.importe_vencido,
+            d.dias_mora,
+            d.documento_mas_antiguo,
+            d.vencimiento_mas_antiguo,
+            p.ultima_compra
+        FROM deuda d
+        INNER JOIN clientes c ON c.id_cliente = d.id_cliente
+        LEFT JOIN compras p ON p.id_cliente = d.id_cliente
+        ORDER BY d.dias_mora DESC, d.importe_vencido DESC;
+        """,
+        (*zona_params, dias_minimos),
+    ).loc[:, columns]
+
+
 def estrategia_cliente(
     cliente: str,
     mes_actual_desde: str,
