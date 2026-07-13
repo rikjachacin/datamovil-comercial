@@ -1887,15 +1887,15 @@ with st.sidebar:
     with st.container(key="dm_nav_panel"):
         if st.button("Panel comercial", use_container_width=True):
             st.session_state["pantalla_activa"] = "Panel comercial"
+    with st.container(key="dm_nav_overdue"):
+        if st.button("Cartera vencida", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Cartera vencida"
     with st.container(key="dm_nav_persat"):
         if st.button("Historial Persat", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Persat"
     with st.container(key="dm_nav_anura"):
         if st.button("Historial Anura", use_container_width=True):
             st.session_state["pantalla_activa"] = "Historial Anura"
-    with st.container(key="dm_nav_overdue"):
-        if st.button("Cartera vencida", use_container_width=True):
-            st.session_state["pantalla_activa"] = "Cartera vencida"
     if user_can_view_clientify(current_user):
         with st.container(key="dm_nav_clientify"):
             if st.button("Historial Clientify", use_container_width=True):
