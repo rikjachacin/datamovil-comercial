@@ -57,6 +57,17 @@ SALES_ZONE_OVERRIDES = (
         "invoice_numbers": ("229687", "75438", "22882"),
     },
 )
+SALES_TOTAL_NEUTRALIZED_DOCUMENTS = (
+    {
+        "date": "2026-07-14",
+        "client_id": "117165",
+        "source_zone": "LUCIA MORENO",
+        "id_facturacion": "288031",
+        "invoice_numbers": ("14780", "230258"),
+        "document_types": ("NC",),
+        "note": "Operacion informada 230258: descuenta deuda, no facturacion de Lucia.",
+    },
+)
 
 
 class SnapshotDataMissing(RuntimeError):
@@ -218,6 +229,34 @@ def _apply_sales_zone_overrides(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _manual_document_mask(df: pd.DataFrame, rules: tuple[dict[str, object], ...]) -> pd.Series:
+    mask = pd.Series(False, index=df.index)
+    if df.empty:
+        return mask
+
+    for rule in rules:
+        rule_mask = pd.Series(True, index=df.index)
+        if rule.get("date") and "fecha" in df.columns:
+            rule_mask &= pd.to_datetime(df["fecha"], errors="coerce").dt.date == pd.to_datetime(rule["date"]).date()
+        if rule.get("client_id") and "id_cliente" in df.columns:
+            rule_mask &= df["id_cliente"].astype(str).str.strip().eq(str(rule["client_id"]))
+        if rule.get("source_zone") and "zona" in df.columns:
+            rule_mask &= df["zona"].map(_normalize_match_text).eq(str(rule["source_zone"]))
+        if rule.get("document_types") and "tipo" in df.columns:
+            document_types = {str(value).upper() for value in rule["document_types"]}
+            rule_mask &= df["tipo"].astype(str).str.upper().isin(document_types)
+
+        invoice_mask = pd.Series(False, index=df.index)
+        if rule.get("id_facturacion") and "id_facturacion" in df.columns:
+            invoice_mask |= df["id_facturacion"].astype(str).str.strip().eq(str(rule["id_facturacion"]))
+        if rule.get("invoice_numbers") and "numero" in df.columns:
+            invoice_numbers = {str(number) for number in rule["invoice_numbers"]}
+            invoice_mask |= df["numero"].astype(str).str.strip().isin(invoice_numbers)
+        rule_mask &= invoice_mask
+        mask |= rule_mask
+    return mask
+
+
 def _snapshot_key() -> str | None:
     env_key = os.getenv("DATAMOVIL_SNAPSHOT_KEY")
     if env_key:
@@ -352,6 +391,8 @@ def _snapshot_filtered_facturas(
         df = df[df["zona"].isin(zonas_filtro)]
 
     sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
+    neutralized = _manual_document_mask(df, SALES_TOTAL_NEUTRALIZED_DOCUMENTS)
+    sign.loc[neutralized] = 0
     df["total_firmado"] = _to_numeric_amount(df["total"]) * sign
     df["subtotal_firmado"] = _to_numeric_amount(df["subtotal"]) * sign
     return df
@@ -450,8 +491,24 @@ def _authorized_invoice_filter(alias: str) -> str:
 
 def _signed_total(alias: str, column: str = "total") -> str:
     negative_types = ", ".join(f"'{doc_type}'" for doc_type in NEGATIVE_COMMERCIAL_DOCUMENT_TYPES)
+    neutral_conditions = []
+    for rule in SALES_TOTAL_NEUTRALIZED_DOCUMENTS:
+        invoice_numbers = ", ".join(f"'{number}'" for number in rule["invoice_numbers"])
+        document_types = ", ".join(f"'{doc_type}'" for doc_type in rule["document_types"])
+        neutral_conditions.append(
+            "("
+            f"CAST({alias}.fecha AS date) = '{rule['date']}' "
+            f"AND CAST({alias}.id_cliente AS varchar(50)) = '{rule['client_id']}' "
+            f"AND COALESCE(NULLIF({alias}.zona, ''), 'Sin zona') = '{rule['source_zone']}' "
+            f"AND {alias}.tipo IN ({document_types}) "
+            f"AND (CAST({alias}.id_facturacion AS varchar(50)) = '{rule['id_facturacion']}' "
+            f"OR CAST({alias}.numero AS varchar(50)) IN ({invoice_numbers}))"
+            ")"
+        )
+    neutral_sql = " OR ".join(neutral_conditions)
+    neutral_case = f"WHEN {neutral_sql} THEN CAST(0 AS decimal(18, 2)) " if neutral_sql else ""
     return (
-        f"CASE WHEN {alias}.tipo IN ({negative_types}) "
+        f"CASE {neutral_case}WHEN {alias}.tipo IN ({negative_types}) "
         f"THEN -CAST({alias}.{column} AS decimal(18, 2)) "
         f"ELSE CAST({alias}.{column} AS decimal(18, 2)) END"
     )
