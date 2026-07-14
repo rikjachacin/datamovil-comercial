@@ -390,6 +390,7 @@ def _snapshot_filtered_facturas(
     if zonas_filtro:
         df = df[df["zona"].isin(zonas_filtro)]
 
+    df = df[~_manual_document_mask(df, SALES_TOTAL_NEUTRALIZED_DOCUMENTS)].copy()
     sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
     neutralized = _manual_document_mask(df, SALES_TOTAL_NEUTRALIZED_DOCUMENTS)
     sign.loc[neutralized] = 0
@@ -449,7 +450,27 @@ def _commercial_zone_filter(alias: str) -> str:
 
 def _commercial_document_filter(alias: str) -> str:
     included = ", ".join(f"'{doc_type}'" for doc_type in COMMERCIAL_DOCUMENT_TYPES)
-    return f" AND {alias}.tipo IN ({included})"
+    return f" AND {alias}.tipo IN ({included}){_neutralized_sales_document_filter(alias)}"
+
+
+def _neutralized_sales_document_filter(alias: str) -> str:
+    conditions = []
+    for rule in SALES_TOTAL_NEUTRALIZED_DOCUMENTS:
+        invoice_numbers = ", ".join(f"'{number}'" for number in rule["invoice_numbers"])
+        document_types = ", ".join(f"'{doc_type}'" for doc_type in rule["document_types"])
+        conditions.append(
+            "("
+            f"CAST({alias}.fecha AS date) = '{rule['date']}' "
+            f"AND CAST({alias}.id_cliente AS varchar(50)) = '{rule['client_id']}' "
+            f"AND COALESCE(NULLIF({alias}.zona, ''), 'Sin zona') = '{rule['source_zone']}' "
+            f"AND {alias}.tipo IN ({document_types}) "
+            f"AND (CAST({alias}.id_facturacion AS varchar(50)) = '{rule['id_facturacion']}' "
+            f"OR CAST({alias}.numero AS varchar(50)) IN ({invoice_numbers}))"
+            ")"
+        )
+    if not conditions:
+        return ""
+    return f" AND NOT ({' OR '.join(conditions)})"
 
 
 def _product_name_expr(item_alias: str = "fi", product_alias: str = "p") -> str:
