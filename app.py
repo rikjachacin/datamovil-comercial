@@ -1285,6 +1285,7 @@ def show_clientify_activity(
         )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def load_overdue_portfolio(zones: tuple[str, ...]) -> pd.DataFrame:
     portfolio = siscor_db.cartera_vencida(zones, dias_minimos=30).copy()
     if portfolio.empty:
