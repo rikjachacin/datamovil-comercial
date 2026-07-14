@@ -785,6 +785,7 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
         return (
             df.groupby("cliente", as_index=False)
             .agg(total=("total_firmado", "sum"), comprobantes=("id_facturacion", "count"))
+            .loc[lambda data: data["total"].ne(0)]
             .sort_values("total", ascending=False)
             .head(limite)
         )
@@ -806,6 +807,7 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
           {_commercial_document_filter("f")}
           {zona_sql}
         GROUP BY COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente))
+        HAVING SUM({_signed_total("f", "total")}) <> 0
         ORDER BY total DESC;
         """,
         (limite, fecha_desde, fecha_hasta, *zona_params),
