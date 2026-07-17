@@ -56,6 +56,15 @@ SALES_ZONE_OVERRIDES = (
         "id_facturacion": "",
         "invoice_numbers": ("229687", "75438", "22882"),
     },
+    {
+        "date": "2026-07-03",
+        "client": "MARTINEZ VERONICA ANDREA (M.P.12421)",
+        "client_id": "102499",
+        "source_zone": "LUCIA MORENO",
+        "target_zone": "BRAVO",
+        "id_facturacion": "286937",
+        "invoice_numbers": ("99793", "229254"),
+    },
 )
 SALES_TOTAL_NEUTRALIZED_DOCUMENTS = (
     {
