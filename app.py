@@ -228,7 +228,7 @@ st.markdown(
 
     .dm-team-kpi {
         display: grid;
-        grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.55fr) minmax(260px, 1fr);
+        grid-template-columns: minmax(220px, 1fr) minmax(180px, auto);
         align-items: center;
         gap: 22px;
         margin: 0 0 18px;
@@ -277,37 +277,6 @@ st.markdown(
         font-size: 13px;
         font-weight: 700;
         text-align: center;
-    }
-
-    .dm-team-kpi-figures {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px 18px;
-        color: #c7d7e5;
-        font-size: 12px;
-    }
-
-    .dm-team-kpi-figures strong {
-        display: block;
-        margin-top: 3px;
-        color: #ffffff;
-        font-size: 16px;
-        font-weight: 750;
-    }
-
-    .dm-team-kpi-progress {
-        grid-column: 1 / -1;
-        height: 8px;
-        margin-top: 2px;
-        overflow: hidden;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.16);
-    }
-
-    .dm-team-kpi-progress > div {
-        height: 100%;
-        border-radius: 8px;
-        background: var(--dm-brand-gold);
     }
 
     .dm-module-heading {
@@ -428,10 +397,6 @@ st.markdown(
 
         .dm-team-kpi-value {
             font-size: 36px;
-        }
-
-        .dm-team-kpi-figures {
-            gap: 9px 14px;
         }
 
         .dm-module-heading {
@@ -1085,13 +1050,10 @@ def render_metric_grid(items: list[tuple[str, str]]) -> str:
 
 def render_team_billing_card(
     completion: object,
-    billed: object,
     goal: object,
 ) -> str:
-    billed_value = numeric_value(billed)
     goal_value = numeric_value(goal)
     completion_value = numeric_value(completion) if goal_value > 0 else 0.0
-    fill_pct = min(max(completion_value * 100, 0), 100)
 
     if goal_value <= 0:
         completion_label = "Sin objetivo"
@@ -1119,13 +1081,6 @@ def render_team_billing_card(
         "<div>"
         f"<div class='dm-team-kpi-value'>{html.escape(completion_label)}</div>"
         f"<div class='dm-team-kpi-status'>{html.escape(status)}</div>"
-        "</div>"
-        "<div class='dm-team-kpi-figures'>"
-        "<div>Facturado por el equipo"
-        f"<strong>{html.escape(money(billed_value))}</strong></div>"
-        "<div>Objetivo total"
-        f"<strong>{html.escape(money(goal_value))}</strong></div>"
-        f"<div class='dm-team-kpi-progress'><div style='width:{fill_pct:.1f}%'></div></div>"
         "</div>"
         "</div>"
     )
@@ -2265,11 +2220,6 @@ if vista_vendedor_activa:
         if not ranking_equipo_con_objetivo.empty and ranking_equipo_con_objetivo["objetivo"].sum()
         else 0
     )
-    facturacion_equipo = (
-        ranking_equipo_con_objetivo["ventas_mes"].sum()
-        if not ranking_equipo_con_objetivo.empty
-        else 0
-    )
     objetivo_equipo = (
         ranking_equipo_con_objetivo["objetivo"].sum()
         if not ranking_equipo_con_objetivo.empty
@@ -2304,7 +2254,6 @@ if vista_vendedor_activa:
     st.markdown(
         render_team_billing_card(
             cobertura_equipo,
-            facturacion_equipo,
             objetivo_equipo,
         ),
         unsafe_allow_html=True,
