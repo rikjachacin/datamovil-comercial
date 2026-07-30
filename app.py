@@ -226,6 +226,90 @@ st.markdown(
         overflow-wrap: anywhere;
     }
 
+    .dm-team-kpi {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.55fr) minmax(260px, 1fr);
+        align-items: center;
+        gap: 22px;
+        margin: 0 0 18px;
+        padding: 20px 22px;
+        border: 1px solid #284d6f;
+        border-left: 7px solid var(--dm-brand-gold);
+        border-radius: 8px;
+        background: #17324d;
+        color: #ffffff;
+        box-shadow: 0 16px 30px rgba(23, 50, 77, 0.22);
+    }
+
+    .dm-team-kpi-label {
+        color: #f2d76d;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    .dm-team-kpi-title {
+        margin-top: 5px;
+        color: #ffffff;
+        font-size: 20px;
+        font-weight: 760;
+        line-height: 1.2;
+    }
+
+    .dm-team-kpi-subtitle {
+        margin-top: 5px;
+        color: #c7d7e5;
+        font-size: 13px;
+    }
+
+    .dm-team-kpi-value {
+        color: #ffffff;
+        font-size: 42px;
+        font-weight: 800;
+        line-height: 1;
+        text-align: center;
+    }
+
+    .dm-team-kpi-status {
+        margin-top: 7px;
+        color: #f2d76d;
+        font-size: 13px;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    .dm-team-kpi-figures {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 18px;
+        color: #c7d7e5;
+        font-size: 12px;
+    }
+
+    .dm-team-kpi-figures strong {
+        display: block;
+        margin-top: 3px;
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 750;
+    }
+
+    .dm-team-kpi-progress {
+        grid-column: 1 / -1;
+        height: 8px;
+        margin-top: 2px;
+        overflow: hidden;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.16);
+    }
+
+    .dm-team-kpi-progress > div {
+        height: 100%;
+        border-radius: 8px;
+        background: var(--dm-brand-gold);
+    }
+
     .dm-module-heading {
         display: flex;
         align-items: center;
@@ -329,6 +413,25 @@ st.markdown(
 
         .dm-compact-value {
             font-size: 19px;
+        }
+
+        .dm-team-kpi {
+            grid-template-columns: 1fr;
+            gap: 14px;
+            padding: 17px 16px;
+        }
+
+        .dm-team-kpi-value,
+        .dm-team-kpi-status {
+            text-align: left;
+        }
+
+        .dm-team-kpi-value {
+            font-size: 36px;
+        }
+
+        .dm-team-kpi-figures {
+            gap: 9px 14px;
         }
 
         .dm-module-heading {
@@ -978,6 +1081,54 @@ def render_metric_grid(items: list[tuple[str, str]]) -> str:
             "</div>"
         )
     return "<div class='dm-metric-grid'>" + "".join(cards) + "</div>"
+
+
+def render_team_billing_card(
+    completion: object,
+    billed: object,
+    goal: object,
+) -> str:
+    billed_value = numeric_value(billed)
+    goal_value = numeric_value(goal)
+    completion_value = numeric_value(completion) if goal_value > 0 else 0.0
+    fill_pct = min(max(completion_value * 100, 0), 100)
+
+    if goal_value <= 0:
+        completion_label = "Sin objetivo"
+        status = "No hay objetivo mensual cargado para el equipo"
+    elif completion_value >= 1:
+        completion_label = percent(completion_value)
+        status = "Objetivo del equipo alcanzado"
+    elif completion_value >= 0.8:
+        completion_label = percent(completion_value)
+        status = "El equipo esta en el tramo final"
+    elif completion_value >= 0.6:
+        completion_label = percent(completion_value)
+        status = "El equipo avanza sobre el objetivo"
+    else:
+        completion_label = percent(completion_value)
+        status = "El equipo necesita mayor impulso"
+
+    return (
+        "<div class='dm-team-kpi'>"
+        "<div>"
+        "<div class='dm-team-kpi-label'>Indicador de equipo</div>"
+        "<div class='dm-team-kpi-title'>Facturacion del equipo completo</div>"
+        "<div class='dm-team-kpi-subtitle'>Cumplimiento acumulado del objetivo mensual vigente</div>"
+        "</div>"
+        "<div>"
+        f"<div class='dm-team-kpi-value'>{html.escape(completion_label)}</div>"
+        f"<div class='dm-team-kpi-status'>{html.escape(status)}</div>"
+        "</div>"
+        "<div class='dm-team-kpi-figures'>"
+        "<div>Facturado por el equipo"
+        f"<strong>{html.escape(money(billed_value))}</strong></div>"
+        "<div>Objetivo total"
+        f"<strong>{html.escape(money(goal_value))}</strong></div>"
+        f"<div class='dm-team-kpi-progress'><div style='width:{fill_pct:.1f}%'></div></div>"
+        "</div>"
+        "</div>"
+    )
 
 
 def render_module_heading(title: str, subtitle: str = "", kind: str = "sales", icon: str = "") -> str:
@@ -2114,6 +2265,16 @@ if vista_vendedor_activa:
         if not ranking_equipo_con_objetivo.empty and ranking_equipo_con_objetivo["objetivo"].sum()
         else 0
     )
+    facturacion_equipo = (
+        ranking_equipo_con_objetivo["ventas_mes"].sum()
+        if not ranking_equipo_con_objetivo.empty
+        else 0
+    )
+    objetivo_equipo = (
+        ranking_equipo_con_objetivo["objetivo"].sum()
+        if not ranking_equipo_con_objetivo.empty
+        else 0
+    )
     clientes_vendedor = siscor_db.clientes_a_recuperar(
         desde_sql,
         hasta_sql,
@@ -2141,6 +2302,15 @@ if vista_vendedor_activa:
     clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
 
     st.markdown(
+        render_team_billing_card(
+            cobertura_equipo,
+            facturacion_equipo,
+            objetivo_equipo,
+        ),
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
         render_module_heading(
             "Mi avance del mes" if periodo == "Mes en curso" else "Mi avance del periodo",
             "Resumen del objetivo, ritmo y ticket de la zona",
@@ -2160,7 +2330,6 @@ if vista_vendedor_activa:
                         ("Objetivo", money(vendedor_row["objetivo"])),
                         ("Cumplimiento", percent(vendedor_row["cumplimiento"])),
                         ("Diario necesario", money(vendedor_row["venta_diaria_necesaria"])),
-                        ("Cobertura equipo", percent(cobertura_equipo)),
                         ("Ritmo a la fecha", percent(vendedor_row["ritmo"])),
                         ("Proyeccion cierre", money(vendedor_row["proyeccion_cierre"])),
                         (
