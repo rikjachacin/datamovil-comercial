@@ -1051,6 +1051,7 @@ def render_metric_grid(items: list[tuple[str, str]]) -> str:
 def render_team_billing_card(
     completion: object,
     goal: object,
+    subtitle: str = "Cumplimiento acumulado del objetivo mensual vigente",
 ) -> str:
     goal_value = numeric_value(goal)
     completion_value = numeric_value(completion) if goal_value > 0 else 0.0
@@ -1076,7 +1077,7 @@ def render_team_billing_card(
         "<div>"
         "<div class='dm-team-kpi-label'>Indicador de equipo</div>"
         "<div class='dm-team-kpi-title'>Facturacion del equipo completo</div>"
-        "<div class='dm-team-kpi-subtitle'>Cumplimiento acumulado del objetivo mensual vigente</div>"
+        f"<div class='dm-team-kpi-subtitle'>{html.escape(subtitle)}</div>"
         "</div>"
         "<div>"
         f"<div class='dm-team-kpi-value'>{html.escape(completion_label)}</div>"
@@ -2220,6 +2221,57 @@ if vista_vendedor_activa:
         if not ranking_equipo_con_objetivo.empty
         else 0
     )
+    cobertura_equipo_tarjeta = cobertura_equipo
+    objetivo_equipo_tarjeta = objetivo_equipo
+    subtitulo_equipo_tarjeta = "Cumplimiento acumulado del objetivo mensual vigente"
+    if periodo != "Mes en curso":
+        facturacion_equipo_periodo = 0.0
+        objetivo_equipo_periodo = 0.0
+        meses_periodo_con_objetivo = 0
+        for mes_periodo in pd.period_range(fecha_desde, fecha_hasta, freq="M"):
+            mes_periodo_key = str(mes_periodo)
+            objetivos_equipo_mes = objetivos_df[
+                (objetivos_df["mes"] == mes_periodo_key)
+                & (objetivos_df["objetivo"] > 0)
+            ].copy()
+            if objetivos_equipo_mes.empty:
+                continue
+
+            zonas_equipo_mes = tuple(
+                objetivos_equipo_mes["zona"].dropna().astype(str).unique()
+            )
+            segmento_desde = max(fecha_desde, mes_periodo.start_time.date())
+            segmento_hasta = min(fecha_hasta, mes_periodo.end_time.date())
+            ventas_equipo_segmento = siscor_db.ventas_por_zona(
+                segmento_desde.isoformat(),
+                segmento_hasta.isoformat(),
+                zonas_equipo_mes,
+            )
+            facturacion_equipo_periodo += (
+                numeric_value(ventas_equipo_segmento["total"].sum())
+                if not ventas_equipo_segmento.empty
+                else 0.0
+            )
+            objetivo_equipo_periodo += numeric_value(
+                objetivos_equipo_mes["objetivo"].sum()
+            )
+            meses_periodo_con_objetivo += 1
+
+        objetivo_equipo_tarjeta = objetivo_equipo_periodo
+        cobertura_equipo_tarjeta = (
+            facturacion_equipo_periodo / objetivo_equipo_periodo
+            if objetivo_equipo_periodo
+            else 0.0
+        )
+        rango_equipo_label = f"{fecha_desde:%d/%m/%Y} al {fecha_hasta:%d/%m/%Y}"
+        if meses_periodo_con_objetivo > 1:
+            subtitulo_equipo_tarjeta = (
+                f"Facturacion del {rango_equipo_label} frente a los objetivos mensuales incluidos"
+            )
+        else:
+            subtitulo_equipo_tarjeta = (
+                f"Facturacion del {rango_equipo_label} frente al objetivo mensual correspondiente"
+            )
     clientes_vendedor = siscor_db.clientes_a_recuperar(
         desde_sql,
         hasta_sql,
@@ -2248,8 +2300,9 @@ if vista_vendedor_activa:
 
     st.markdown(
         render_team_billing_card(
-            cobertura_equipo,
-            objetivo_equipo,
+            cobertura_equipo_tarjeta,
+            objetivo_equipo_tarjeta,
+            subtitulo_equipo_tarjeta,
         ),
         unsafe_allow_html=True,
     )
