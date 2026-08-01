@@ -2172,11 +2172,6 @@ if vista_vendedor_activa:
         fecha_maxima.isoformat(),
         zonas_filtro,
     )
-    ventas_periodo_vendedor = siscor_db.ventas_por_zona(
-        desde_sql,
-        hasta_sql,
-        zonas_filtro,
-    )
     if objetivos_df.empty:
         desempeno_vendedor = pd.DataFrame()
         ranking_equipo_vendedor = pd.DataFrame()
@@ -2268,10 +2263,10 @@ if vista_vendedor_activa:
         ),
         unsafe_allow_html=True,
     )
-    if vendedor_row is None:
-        st.warning("Tu zona no tiene objetivo cargado para este mes.")
-    else:
-        if periodo == "Mes en curso":
+    if periodo == "Mes en curso":
+        if vendedor_row is None:
+            st.warning("Tu zona no tiene objetivo cargado para este mes.")
+        else:
             st.markdown(
                 render_metric_grid(
                     [
@@ -2294,50 +2289,66 @@ if vista_vendedor_activa:
                 ),
                 unsafe_allow_html=True,
             )
-        else:
-            ventas_periodo_total = (
-                ventas_periodo_vendedor["total"].sum() if not ventas_periodo_vendedor.empty else 0
-            )
-            periodo_objetivo_desde = max(fecha_desde, mes_actual_desde)
-            periodo_objetivo_hasta = min(fecha_hasta, fecha_maxima)
-            dias_periodo_objetivo = objectives.business_days_between(
-                periodo_objetivo_desde,
-                periodo_objetivo_hasta,
-            )
-            dias_mes_objetivo = objectives.business_days_in_month(fecha_maxima)
-            objetivo_mensual = numeric_value(vendedor_row["objetivo"])
+    else:
+        ventas_periodo_total = numeric_value(kpi_df["total"])
+        comprobantes_periodo = numeric_value(kpi_df["comprobantes"])
+        clientes_periodo = numeric_value(kpi_df["clientes"])
+        ticket_promedio_periodo = (
+            ventas_periodo_total / comprobantes_periodo if comprobantes_periodo else 0
+        )
+        metricas_periodo = [
+            ("Ventas periodo", money(ventas_periodo_total)),
+            ("Comprobantes", number(comprobantes_periodo)),
+            ("Clientes", number(clientes_periodo)),
+            ("Ticket promedio", money(ticket_promedio_periodo)),
+        ]
+
+        periodo_en_un_mes = (
+            fecha_desde.year == fecha_hasta.year
+            and fecha_desde.month == fecha_hasta.month
+        )
+        mes_objetivo_periodo = objectives.month_key(fecha_hasta) if periodo_en_un_mes else None
+        objetivos_periodo = (
+            objetivos_df[
+                (objetivos_df["mes"] == mes_objetivo_periodo)
+                & (objetivos_df["zona"].isin(zonas_filtro))
+            ]
+            if mes_objetivo_periodo
+            else pd.DataFrame()
+        )
+        objetivo_mensual_periodo = (
+            numeric_value(objetivos_periodo["objetivo"].sum())
+            if not objetivos_periodo.empty
+            else 0
+        )
+        if objetivo_mensual_periodo:
+            dias_periodo_objetivo = objectives.business_days_between(fecha_desde, fecha_hasta)
+            dias_mes_objetivo = objectives.business_days_in_month(fecha_hasta)
             meta_periodo = (
-                numeric_value(vendedor_row["objetivo"]) * dias_periodo_objetivo / dias_mes_objetivo
+                objetivo_mensual_periodo * dias_periodo_objetivo / dias_mes_objetivo
                 if dias_mes_objetivo
                 else 0
             )
-            cumplimiento_objetivo = ventas_periodo_total / objetivo_mensual if objetivo_mensual else 0
             ritmo_periodo = ventas_periodo_total / meta_periodo if meta_periodo else 0
-            comprobantes_periodo = (
-                ventas_periodo_vendedor["comprobantes"].sum()
-                if not ventas_periodo_vendedor.empty
-                else 0
-            )
-            ticket_promedio_periodo = (
-                ventas_periodo_total / comprobantes_periodo if comprobantes_periodo else 0
+            metricas_periodo.extend(
+                [
+                    ("Objetivo mensual", money(objetivo_mensual_periodo)),
+                    ("Meta proporcional", money(meta_periodo)),
+                    ("Ritmo vs meta", percent(ritmo_periodo)),
+                ]
             )
 
-            st.markdown(
-                render_metric_grid(
-                    [
-                        ("Ventas periodo", money(ventas_periodo_total)),
-                        ("Objetivo mensual", money(objetivo_mensual)),
-                        ("Cumplimiento objetivo", percent(cumplimiento_objetivo)),
-                        ("Meta a la fecha", money(meta_periodo)),
-                        ("Ritmo periodo", percent(ritmo_periodo)),
-                        ("Diario necesario mes", money(vendedor_row["venta_diaria_necesaria"])),
-                        ("Ticket promedio", money(ticket_promedio_periodo)),
-                    ]
-                ),
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            render_metric_grid(metricas_periodo),
+            unsafe_allow_html=True,
+        )
+        if objetivo_mensual_periodo:
             st.caption(
-                "La meta a la fecha es proporcional a los dias comerciales seleccionados; el objetivo mensual no cambia."
+                "La meta proporcional considera los dias comerciales seleccionados del mes del periodo."
+            )
+        else:
+            st.caption(
+                "Las ventas del periodo se muestran aunque no haya un objetivo mensual cargado."
             )
 
     ranking_current_zone = str(vendedor_row["zona"]) if vendedor_row is not None else (
