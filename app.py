@@ -480,6 +480,15 @@ st.markdown(
         color: #1d4ed8;
     }
 
+    [data-testid="stSidebar"] .st-key-dm_nav_fluralaner .stButton button {
+        border-left-color: #b42318;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_fluralaner .stButton button:hover {
+        border-left-color: #b42318;
+        color: #8f1d14;
+    }
+
     [data-baseweb="input"],
     [data-baseweb="select"],
     [data-baseweb="popover"] {
@@ -1452,6 +1461,119 @@ def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
     )
 
 
+def show_fluralaner_metrics(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zonas: tuple[str, ...],
+) -> None:
+    st.markdown(
+        render_module_heading(
+            "Metricas Fluralaner",
+            "Unidades netas y facturacion de Bit Trio, Zanex y Ectholaner por zona",
+            "products",
+            "F",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    detail = siscor_db.metricas_fluralaner(fecha_desde_sql, fecha_hasta_sql, zonas)
+    if detail.empty:
+        st.info("No hay ventas de productos Fluralaner para el periodo y las zonas seleccionadas.")
+        return
+
+    for column in ("unidades", "facturacion", "clientes"):
+        detail[column] = pd.to_numeric(detail[column], errors="coerce").fillna(0)
+
+    product_order = ["Bit Trio", "Zanex", "Ectholaner"]
+    product_totals = detail.groupby("producto", as_index=False).agg(
+        unidades=("unidades", "sum"),
+        facturacion=("facturacion", "sum"),
+    )
+    product_units = product_totals.set_index("producto")["unidades"].to_dict()
+
+    metrics = st.columns(4)
+    for column, product in zip(metrics[:3], product_order):
+        column.metric(f"{product} - unidades", number(product_units.get(product, 0)))
+    metrics[3].metric("Facturacion total", money(detail["facturacion"].sum()))
+
+    zone_product = detail.groupby(["zona", "producto"], as_index=False).agg(
+        unidades=("unidades", "sum"),
+        facturacion=("facturacion", "sum"),
+    )
+    zone_order = (
+        zone_product.groupby("zona")["unidades"].sum().sort_values(ascending=True).index.tolist()
+    )
+
+    st.markdown("#### Unidades por zona")
+    fig = px.bar(
+        zone_product,
+        x="unidades",
+        y="zona",
+        color="producto",
+        orientation="h",
+        category_orders={"zona": zone_order, "producto": product_order},
+        color_discrete_map={
+            "Bit Trio": "#0f766e",
+            "Zanex": "#d9b51f",
+            "Ectholaner": "#b42318",
+        },
+        labels={"unidades": "Unidades netas", "zona": "", "producto": "Producto"},
+    )
+    fig.update_layout(
+        height=max(390, 42 * len(zone_order) + 120),
+        legend_title_text="",
+        hovermode="y unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    summary = zone_product.pivot_table(
+        index="zona",
+        columns="producto",
+        values="unidades",
+        aggfunc="sum",
+        fill_value=0,
+    ).reset_index()
+    summary.columns.name = None
+    for product in product_order:
+        if product not in summary.columns:
+            summary[product] = 0.0
+    billing_by_zone = detail.groupby("zona", as_index=False)["facturacion"].sum()
+    summary = summary.merge(billing_by_zone, on="zona", how="left")
+    summary["total_unidades"] = summary[product_order].sum(axis=1)
+    summary = summary.sort_values("total_unidades", ascending=False)
+
+    tab_summary, tab_detail = st.tabs(["Resumen por zona", "Detalle por presentacion"])
+    with tab_summary:
+        st.dataframe(
+            summary.loc[:, ["zona", *product_order, "total_unidades", "facturacion"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "zona": "Zona",
+                "Bit Trio": st.column_config.NumberColumn("Bit Trio", format="%.0f"),
+                "Zanex": st.column_config.NumberColumn("Zanex", format="%.0f"),
+                "Ectholaner": st.column_config.NumberColumn("Ectholaner", format="%.0f"),
+                "total_unidades": st.column_config.NumberColumn("Total unidades", format="%.0f"),
+                "facturacion": st.column_config.NumberColumn("Facturacion", format="$ %.0f"),
+            },
+        )
+
+    with tab_detail:
+        st.dataframe(
+            detail.loc[:, ["zona", "producto", "presentacion", "unidades", "facturacion", "clientes"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "zona": "Zona",
+                "producto": "Producto",
+                "presentacion": "Presentacion",
+                "unidades": st.column_config.NumberColumn("Unidades netas", format="%.0f"),
+                "facturacion": st.column_config.NumberColumn("Facturacion", format="$ %.0f"),
+                "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
+            },
+        )
+
+
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
     st.markdown(
         render_module_heading(
@@ -1995,6 +2117,9 @@ with st.sidebar:
     with st.container(key="dm_nav_panel"):
         if st.button("Panel comercial", use_container_width=True):
             st.session_state["pantalla_activa"] = "Panel comercial"
+    with st.container(key="dm_nav_fluralaner"):
+        if st.button("Metricas Fluralaner", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Metricas Fluralaner"
     with st.container(key="dm_nav_overdue"):
         if st.button("Cartera vencida", use_container_width=True):
             st.session_state["pantalla_activa"] = "Cartera vencida"
@@ -2109,6 +2234,10 @@ if pantalla_activa == "Historial Persat":
 
 if pantalla_activa == "Historial Anura":
     show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
+    st.stop()
+
+if pantalla_activa == "Metricas Fluralaner":
+    show_fluralaner_metrics(desde_sql, hasta_sql, zonas_filtro)
     st.stop()
 
 if pantalla_activa == "Cartera vencida":

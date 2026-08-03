@@ -930,6 +930,91 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
     )
 
 
+def metricas_fluralaner(
+    fecha_desde: str,
+    fecha_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    columns = ["zona", "producto", "presentacion", "unidades", "facturacion", "clientes"]
+
+    if data_mode() == "snapshot":
+        facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[
+            ["id_facturacion", "id_cliente", "zona", "tipo"]
+        ]
+        items = _snapshot_factura_items()
+        df = items.merge(facturas, on="id_facturacion", how="inner")
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+
+        normalized = df["producto"].fillna("").astype(str).str.strip().str.upper()
+        df["producto_fluralaner"] = ""
+        df.loc[normalized.str.startswith("BIT TRIO"), "producto_fluralaner"] = "Bit Trio"
+        df.loc[normalized.str.startswith("ZANEX"), "producto_fluralaner"] = "Zanex"
+        df.loc[normalized.str.startswith("ECTHOLANER"), "producto_fluralaner"] = "Ectholaner"
+        df = df[df["producto_fluralaner"].ne("")].copy()
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+
+        sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
+        df["unidades_firmadas"] = _to_numeric_amount(df["cantidad"]) * sign
+        df["facturacion_firmada"] = _to_numeric_amount(df["total"]) * sign
+        df["presentacion"] = df["producto"].fillna("").astype(str).str.strip()
+        return (
+            df.groupby(["zona", "producto_fluralaner", "presentacion"], as_index=False)
+            .agg(
+                unidades=("unidades_firmadas", "sum"),
+                facturacion=("facturacion_firmada", "sum"),
+                clientes=("id_cliente", "nunique"),
+            )
+            .rename(columns={"producto_fluralaner": "producto"})
+            .loc[:, columns]
+            .sort_values(["zona", "producto", "unidades"], ascending=[True, True, False])
+        )
+
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
+    product_expr = _product_name_expr("fi", "p")
+    normalized_product = f"UPPER(LTRIM(RTRIM({product_expr})))"
+    product_family = (
+        "CASE "
+        f"WHEN {normalized_product} LIKE 'BIT TRIO%' THEN 'Bit Trio' "
+        f"WHEN {normalized_product} LIKE 'ZANEX%' THEN 'Zanex' "
+        f"WHEN {normalized_product} LIKE 'ECTHOLANER%' THEN 'Ectholaner' "
+        "END"
+    )
+    signed_quantity = _signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")
+    signed_total = _signed_item_total("f", "total").replace("f.total", "fi.total")
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT
+            {factura_zone} AS zona,
+            {product_family} AS producto,
+            {product_expr} AS presentacion,
+            SUM({signed_quantity}) AS unidades,
+            SUM({signed_total}) AS facturacion,
+            COUNT(DISTINCT f.id_cliente) AS clientes
+        FROM dbo.cli_factura_item fi
+        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND CAST(f.fecha AS date) BETWEEN ? AND ?
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          AND (
+              {normalized_product} LIKE 'BIT TRIO%'
+              OR {normalized_product} LIKE 'ZANEX%'
+              OR {normalized_product} LIKE 'ECTHOLANER%'
+          )
+          {zona_sql}
+        GROUP BY {factura_zone}, {product_family}, {product_expr}
+        ORDER BY zona, producto, unidades DESC;
+        """,
+        (fecha_desde, fecha_hasta, *zona_params),
+    )
+
+
 def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     columns = ["zona", "marca", "total"]
     if data_mode() == "snapshot":
