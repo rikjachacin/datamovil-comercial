@@ -1477,10 +1477,7 @@ def show_fluralaner_metrics(
     )
 
     detail = siscor_db.metricas_fluralaner(fecha_desde_sql, fecha_hasta_sql, zonas)
-    if detail.empty:
-        st.info("No hay ventas de productos Fluralaner para el periodo y las zonas seleccionadas.")
-        return
-
+    had_sales = not detail.empty
     for column in ("unidades", "facturacion", "clientes"):
         detail[column] = pd.to_numeric(detail[column], errors="coerce").fillna(0)
 
@@ -1500,31 +1497,44 @@ def show_fluralaner_metrics(
         unidades=("unidades", "sum"),
         facturacion=("facturacion", "sum"),
     )
+    selected_zones = list(dict.fromkeys(str(zone) for zone in zonas))
+    if selected_zones:
+        scaffold = pd.MultiIndex.from_product(
+            [selected_zones, product_order],
+            names=["zona", "producto"],
+        ).to_frame(index=False)
+        zone_product = scaffold.merge(zone_product, on=["zona", "producto"], how="left")
+        zone_product[["unidades", "facturacion"]] = zone_product[
+            ["unidades", "facturacion"]
+        ].fillna(0)
     zone_order = (
         zone_product.groupby("zona")["unidades"].sum().sort_values(ascending=True).index.tolist()
     )
 
     st.markdown("#### Unidades por zona")
-    fig = px.bar(
-        zone_product,
-        x="unidades",
-        y="zona",
-        color="producto",
-        orientation="h",
-        category_orders={"zona": zone_order, "producto": product_order},
-        color_discrete_map={
-            "Bit Trio": "#0f766e",
-            "Zanex": "#d9b51f",
-            "Ectholaner": "#b42318",
-        },
-        labels={"unidades": "Unidades netas", "zona": "", "producto": "Producto"},
-    )
-    fig.update_layout(
-        height=max(390, 42 * len(zone_order) + 120),
-        legend_title_text="",
-        hovermode="y unified",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if had_sales:
+        fig = px.bar(
+            zone_product,
+            x="unidades",
+            y="zona",
+            color="producto",
+            orientation="h",
+            category_orders={"zona": zone_order, "producto": product_order},
+            color_discrete_map={
+                "Bit Trio": "#0f766e",
+                "Zanex": "#d9b51f",
+                "Ectholaner": "#b42318",
+            },
+            labels={"unidades": "Unidades netas", "zona": "", "producto": "Producto"},
+        )
+        fig.update_layout(
+            height=max(390, 42 * len(zone_order) + 120),
+            legend_title_text="",
+            hovermode="y unified",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Esta zona todavia no registra ventas de Fluralaner en el periodo seleccionado.")
 
     summary = zone_product.pivot_table(
         index="zona",
@@ -1559,19 +1569,22 @@ def show_fluralaner_metrics(
         )
 
     with tab_detail:
-        st.dataframe(
-            detail.loc[:, ["zona", "producto", "presentacion", "unidades", "facturacion", "clientes"]],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "zona": "Zona",
-                "producto": "Producto",
-                "presentacion": "Presentacion",
-                "unidades": st.column_config.NumberColumn("Unidades netas", format="%.0f"),
-                "facturacion": st.column_config.NumberColumn("Facturacion", format="$ %.0f"),
-                "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
-            },
-        )
+        if detail.empty:
+            st.info("Sin presentaciones vendidas en el periodo seleccionado.")
+        else:
+            st.dataframe(
+                detail.loc[:, ["zona", "producto", "presentacion", "unidades", "facturacion", "clientes"]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "zona": "Zona",
+                    "producto": "Producto",
+                    "presentacion": "Presentacion",
+                    "unidades": st.column_config.NumberColumn("Unidades netas", format="%.0f"),
+                    "facturacion": st.column_config.NumberColumn("Facturacion", format="$ %.0f"),
+                    "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
+                },
+            )
 
 
 def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
