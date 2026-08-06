@@ -948,6 +948,7 @@ def metricas_fluralaner(
 
         normalized = df["producto"].fillna("").astype(str).str.strip().str.upper()
         df["producto_fluralaner"] = ""
+        df.loc[normalized.str.startswith("FELINE FULL"), "producto_fluralaner"] = "Feline Full"
         df.loc[normalized.str.startswith("BIT TRIO"), "producto_fluralaner"] = "Bit Trio"
         df.loc[normalized.str.startswith("ZANEX"), "producto_fluralaner"] = "Zanex"
         df.loc[normalized.str.startswith("ECTHOLANER"), "producto_fluralaner"] = "Ectholaner"
@@ -977,6 +978,7 @@ def metricas_fluralaner(
     normalized_product = f"UPPER(LTRIM(RTRIM({product_expr})))"
     product_family = (
         "CASE "
+        f"WHEN {normalized_product} LIKE 'FELINE FULL%' THEN 'Feline Full' "
         f"WHEN {normalized_product} LIKE 'BIT TRIO%' THEN 'Bit Trio' "
         f"WHEN {normalized_product} LIKE 'ZANEX%' THEN 'Zanex' "
         f"WHEN {normalized_product} LIKE 'ECTHOLANER%' THEN 'Ectholaner' "
@@ -1003,7 +1005,8 @@ def metricas_fluralaner(
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
           AND (
-              {normalized_product} LIKE 'BIT TRIO%'
+              {normalized_product} LIKE 'FELINE FULL%'
+              OR {normalized_product} LIKE 'BIT TRIO%'
               OR {normalized_product} LIKE 'ZANEX%'
               OR {normalized_product} LIKE 'ECTHOLANER%'
           )

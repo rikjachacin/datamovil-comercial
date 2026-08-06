@@ -16,6 +16,7 @@ from src import auth
 from src import anura_api
 from src import clientify_api
 from src import commissions
+from src import fluralaner
 from src import objectives
 from src import parrilla
 from src import persat_api
@@ -1465,11 +1466,12 @@ def show_fluralaner_metrics(
     fecha_desde_sql: str,
     fecha_hasta_sql: str,
     zonas: tuple[str, ...],
+    seller_view: bool = False,
 ) -> None:
     st.markdown(
         render_module_heading(
             "Metricas Fluralaner",
-            "Unidades netas y facturacion de Bit Trio, Zanex y Ectholaner por zona",
+            "Unidades, objetivos e incentivos de Feline Full, Bit Trio, Ectholaner y Zanex",
             "products",
             "F",
         ),
@@ -1481,17 +1483,41 @@ def show_fluralaner_metrics(
     for column in ("unidades", "facturacion", "clientes"):
         detail[column] = pd.to_numeric(detail[column], errors="coerce").fillna(0)
 
-    product_order = ["Bit Trio", "Zanex", "Ectholaner"]
+    product_order = list(fluralaner.PRODUCT_ORDER)
+    if seller_view:
+        seller_table = fluralaner.seller_summary(detail, zonas).rename(
+            columns={
+                "producto": "Producto",
+                "unidades_vendidas": "Unidades vendidas",
+                "objetivo": "Objetivo",
+                "incentivo_acumulado": "Incentivo acumulado",
+            }
+        )
+        st.dataframe(
+            seller_table,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Producto": st.column_config.TextColumn("Producto", width="medium"),
+                "Unidades vendidas": st.column_config.NumberColumn("Unidades vendidas", format="%.0f"),
+                "Objetivo": st.column_config.NumberColumn("Objetivo", format="%.0f"),
+                "Incentivo acumulado": st.column_config.NumberColumn(
+                    "Incentivo acumulado", format="$ %.0f"
+                ),
+            },
+        )
+        return
+
     product_totals = detail.groupby("producto", as_index=False).agg(
         unidades=("unidades", "sum"),
         facturacion=("facturacion", "sum"),
     )
     product_units = product_totals.set_index("producto")["unidades"].to_dict()
 
-    metrics = st.columns(4)
-    for column, product in zip(metrics[:3], product_order):
+    metrics = st.columns(len(product_order) + 1)
+    for column, product in zip(metrics[:-1], product_order):
         column.metric(f"{product} - unidades", number(product_units.get(product, 0)))
-    metrics[3].metric("Facturacion total", money(detail["facturacion"].sum()))
+    metrics[-1].metric("Facturacion total", money(detail["facturacion"].sum()))
 
     zone_product = detail.groupby(["zona", "producto"], as_index=False).agg(
         unidades=("unidades", "sum"),
@@ -1521,6 +1547,7 @@ def show_fluralaner_metrics(
             orientation="h",
             category_orders={"zona": zone_order, "producto": product_order},
             color_discrete_map={
+                "Feline Full": "#2563eb",
                 "Bit Trio": "#0f766e",
                 "Zanex": "#d9b51f",
                 "Ectholaner": "#b42318",
@@ -1534,7 +1561,7 @@ def show_fluralaner_metrics(
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Esta zona todavia no registra ventas de Fluralaner en el periodo seleccionado.")
+        st.info("Esta zona todavia no registra ventas de los productos medidos en el periodo seleccionado.")
 
     summary = zone_product.pivot_table(
         index="zona",
@@ -1560,6 +1587,7 @@ def show_fluralaner_metrics(
             hide_index=True,
             column_config={
                 "zona": "Zona",
+                "Feline Full": st.column_config.NumberColumn("Feline Full", format="%.0f"),
                 "Bit Trio": st.column_config.NumberColumn("Bit Trio", format="%.0f"),
                 "Zanex": st.column_config.NumberColumn("Zanex", format="%.0f"),
                 "Ectholaner": st.column_config.NumberColumn("Ectholaner", format="%.0f"),
@@ -2250,7 +2278,7 @@ if pantalla_activa == "Historial Anura":
     st.stop()
 
 if pantalla_activa == "Metricas Fluralaner":
-    show_fluralaner_metrics(desde_sql, hasta_sql, zonas_filtro)
+    show_fluralaner_metrics(desde_sql, hasta_sql, zonas_filtro, vista_vendedor_activa)
     st.stop()
 
 if pantalla_activa == "Cartera vencida":
