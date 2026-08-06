@@ -19,6 +19,9 @@ INCENTIVE_PER_UNIT = {
     "Zanex": 0.0,
 }
 REQUIRED_COLUMNS = ("zona", "producto", "objetivo")
+SALES_ZONE_REASSIGNMENTS = {
+    "FRANCISCO": "JUAN C. MANZELLI",
+}
 
 
 def load_objectives() -> pd.DataFrame:
@@ -47,20 +50,43 @@ def load_objectives() -> pd.DataFrame:
     return out[out["producto"].isin(PRODUCT_ORDER)].copy()
 
 
+def sales_query_zones(zones: tuple[str, ...]) -> tuple[str, ...]:
+    expanded = list(dict.fromkeys(str(zone).strip().upper() for zone in zones))
+    for source_zone, target_zone in SALES_ZONE_REASSIGNMENTS.items():
+        if target_zone in expanded and source_zone not in expanded:
+            expanded.append(source_zone)
+    return tuple(expanded)
+
+
+def reassign_sales_zones(sales: pd.DataFrame) -> pd.DataFrame:
+    if sales.empty or "zona" not in sales.columns:
+        return sales.copy()
+    out = sales.copy()
+    normalized = out["zona"].fillna("").astype(str).str.strip().str.upper()
+    for source_zone, target_zone in SALES_ZONE_REASSIGNMENTS.items():
+        out.loc[normalized.eq(source_zone), "zona"] = target_zone
+    return out
+
+
 def seller_summary(sales: pd.DataFrame, zones: tuple[str, ...]) -> pd.DataFrame:
     base = pd.DataFrame({"producto": PRODUCT_ORDER})
-    if sales.empty:
+    normalized_zones = {str(zone).strip().upper() for zone in zones}
+    scoped_sales = sales.copy()
+    if not scoped_sales.empty and "zona" in scoped_sales.columns:
+        sales_zones = scoped_sales["zona"].fillna("").astype(str).str.strip().str.upper()
+        scoped_sales = scoped_sales[sales_zones.isin(normalized_zones)].copy()
+
+    if scoped_sales.empty:
         units = pd.DataFrame(columns=["producto", "unidades_vendidas"])
     else:
         units = (
-            sales.groupby("producto", as_index=False)["unidades"]
+            scoped_sales.groupby("producto", as_index=False)["unidades"]
             .sum()
             .rename(columns={"unidades": "unidades_vendidas"})
         )
     base = base.merge(units, on="producto", how="left")
     base["unidades_vendidas"] = pd.to_numeric(base["unidades_vendidas"], errors="coerce").fillna(0)
 
-    normalized_zones = {str(zone).strip().upper() for zone in zones}
     objectives = load_objectives()
     objectives = objectives[objectives["zona"].isin(normalized_zones)]
     objectives = objectives.groupby("producto", as_index=False)["objetivo"].sum()

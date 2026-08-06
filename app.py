@@ -1478,7 +1478,9 @@ def show_fluralaner_metrics(
         unsafe_allow_html=True,
     )
 
-    detail = siscor_db.metricas_fluralaner(fecha_desde_sql, fecha_hasta_sql, zonas)
+    query_zones = fluralaner.sales_query_zones(zonas)
+    detail = siscor_db.metricas_fluralaner(fecha_desde_sql, fecha_hasta_sql, query_zones)
+    detail = fluralaner.reassign_sales_zones(detail)
     had_sales = not detail.empty
     for column in ("unidades", "facturacion", "clientes"):
         detail[column] = pd.to_numeric(detail[column], errors="coerce").fillna(0)
