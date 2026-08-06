@@ -1463,7 +1463,7 @@ def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
 
 
 def show_fluralaner_metrics(
-    fecha_desde_sql: str,
+    _fecha_desde_sql: str,
     fecha_hasta_sql: str,
     zonas: tuple[str, ...],
     seller_view: bool = False,
@@ -1471,7 +1471,7 @@ def show_fluralaner_metrics(
     st.markdown(
         render_module_heading(
             "Metricas Fluralaner",
-            "Unidades, objetivos e incentivos de Feline Full, Bit Trio, Ectholaner y Zanex",
+            "Campana acumulada hasta el 30/09/2026",
             "products",
             "F",
         ),
@@ -1479,7 +1479,21 @@ def show_fluralaner_metrics(
     )
 
     query_zones = fluralaner.sales_query_zones(zonas)
-    detail = siscor_db.metricas_fluralaner(fecha_desde_sql, fecha_hasta_sql, query_zones)
+    campaign_frames = []
+    for start_date, end_date, products in fluralaner.campaign_sales_windows(fecha_hasta_sql):
+        window_sales = siscor_db.metricas_fluralaner(
+            start_date.isoformat(),
+            end_date.isoformat(),
+            query_zones,
+        )
+        campaign_frames.append(window_sales[window_sales["producto"].isin(products)].copy())
+    detail = (
+        pd.concat(campaign_frames, ignore_index=True)
+        if campaign_frames
+        else pd.DataFrame(
+            columns=["zona", "producto", "presentacion", "unidades", "facturacion", "clientes"]
+        )
+    )
     detail = fluralaner.reassign_sales_zones(detail)
     had_sales = not detail.empty
     for column in ("unidades", "facturacion", "clientes"):
@@ -1487,6 +1501,7 @@ def show_fluralaner_metrics(
 
     product_order = list(fluralaner.PRODUCT_ORDER)
     if seller_view:
+        st.caption("Feline Full desde 01/07/2026. Los demas productos desde 01/08/2026.")
         seller_table = fluralaner.seller_summary(detail, zonas).rename(
             columns={
                 "producto": "Producto",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 
@@ -19,6 +20,13 @@ INCENTIVE_PER_UNIT = {
     "Zanex": 0.0,
 }
 REQUIRED_COLUMNS = ("zona", "producto", "objetivo")
+CAMPAIGN_END_DATE = date(2026, 9, 30)
+PRODUCT_START_DATES = {
+    "Feline Full": date(2026, 7, 1),
+    "Bit Trio": date(2026, 8, 1),
+    "Ectholaner": date(2026, 8, 1),
+    "Zanex": date(2026, 8, 1),
+}
 SALES_ZONE_REASSIGNMENTS = {
     "FRANCISCO": "JUAN C. MANZELLI",
 }
@@ -66,6 +74,18 @@ def reassign_sales_zones(sales: pd.DataFrame) -> pd.DataFrame:
     for source_zone, target_zone in SALES_ZONE_REASSIGNMENTS.items():
         out.loc[normalized.eq(source_zone), "zona"] = target_zone
     return out
+
+
+def campaign_sales_windows(cutoff: object) -> tuple[tuple[date, date, tuple[str, ...]], ...]:
+    campaign_cutoff = min(pd.to_datetime(cutoff).date(), CAMPAIGN_END_DATE)
+    grouped: dict[date, list[str]] = {}
+    for product in PRODUCT_ORDER:
+        grouped.setdefault(PRODUCT_START_DATES[product], []).append(product)
+    return tuple(
+        (start_date, campaign_cutoff, tuple(products))
+        for start_date, products in grouped.items()
+        if campaign_cutoff >= start_date
+    )
 
 
 def seller_summary(sales: pd.DataFrame, zones: tuple[str, ...]) -> pd.DataFrame:
