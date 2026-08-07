@@ -11,6 +11,7 @@ data/*.parquet
 data/*.key
 data/*.sqlite*
 data/comisiones/*.xlsx
+data/informes_semanales/*.xlsx
 *.ovpn
 *.key
 *.crt

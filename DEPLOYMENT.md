@@ -134,6 +134,18 @@ sqlcmd -S 10.8.0.1,50672 -d d_bruncas -U USUARIO_SOLO_LECTURA -P CLAVE -Q "SELEC
 11. Publicar con Cloudflare Tunnel o proxy HTTPS.
 12. Probar desde celular con datos moviles.
 
+## Informe semanal de vendedores
+
+En el servidor Windows, instalar la tarea programada una sola vez:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install_weekly_report_task.ps1
+```
+
+La tarea genera el Excel cada sabado a las 09:00 y lo guarda en
+`data\informes_semanales`. Desde la pantalla `Informes semanales`, un
+administrador puede descargar el ultimo archivo a su computadora.
+
 ## Estado actual
 
 - App funcional en desarrollo.

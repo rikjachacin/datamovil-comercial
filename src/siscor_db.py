@@ -930,6 +930,57 @@ def top_productos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, .
     )
 
 
+def unidades_por_zona(
+    fecha_desde: str,
+    fecha_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    columns = ["zona", "unidades"]
+    if data_mode() == "snapshot":
+        facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[
+            ["id_facturacion", "zona", "tipo"]
+        ]
+        items = _snapshot_factura_items()
+        df = items.merge(facturas, on="id_facturacion", how="inner")
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+        sign = _negative_document_mask(df["tipo"]).map(lambda is_negative: -1 if is_negative else 1)
+        df["unidades"] = _to_numeric_amount(df["cantidad"]) * sign
+        df = _filter_commercial_products(df)
+        return (
+            df.groupby("zona", as_index=False)["unidades"]
+            .sum()
+            .loc[:, columns]
+            .sort_values("unidades", ascending=False)
+        )
+
+    factura_zone = _sales_zone_expr("f")
+    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
+    product_expr = _product_name_expr("fi", "p")
+    signed_quantity = _signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT
+            {factura_zone} AS zona,
+            SUM({signed_quantity}) AS unidades
+        FROM dbo.cli_factura_item fi
+        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND CAST(f.fecha AS date) BETWEEN ? AND ?
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          {_commercial_product_filter(product_expr)}
+          {zona_sql}
+        GROUP BY {factura_zone}
+        ORDER BY unidades DESC;
+        """,
+        (fecha_desde, fecha_hasta, *zona_params),
+    )
+
+
 def metricas_fluralaner(
     fecha_desde: str,
     fecha_hasta: str,

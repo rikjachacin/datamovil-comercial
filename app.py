@@ -21,6 +21,7 @@ from src import objectives
 from src import parrilla
 from src import persat_api
 from src import siscor_db
+from src import weekly_reports
 
 
 APP_NAME = "Bruncas Comercial"
@@ -1801,6 +1802,65 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
     render_parrilla_progress(vendor)
 
 
+def show_weekly_reports(current_user: auth.User) -> None:
+    st.markdown(
+        render_module_heading(
+            "Informes semanales",
+            "Desempeno acumulado y actividad semanal por vendedor",
+            "reports",
+            "XLSX",
+        ),
+        unsafe_allow_html=True,
+    )
+    if not current_user.is_admin:
+        st.warning("Este modulo esta disponible solo para administradores.")
+        return
+
+    st.caption("Programado: sabados a las 09:00 (hora de Argentina)")
+    if st.button("Generar informe ahora", type="primary", use_container_width=False):
+        with st.spinner("Consultando SisCor, Anura, Clientify y Persat..."):
+            result = weekly_reports.generate_report(date.today())
+        if result.enabled:
+            st.success(f"Informe generado: {result.path.name}")
+        else:
+            st.error("No se pudo generar el informe.")
+            st.code(result.message)
+
+    reports = weekly_reports.list_reports()
+    if not reports:
+        st.info("Todavia no hay informes semanales generados.")
+        return
+
+    latest = reports[0]
+    match = weekly_reports.REPORT_NAME_PATTERN.match(latest.name)
+    cutoff_label = pd.to_datetime(match.group(1)).strftime("%d/%m/%Y") if match else latest.stem
+    generated_at = pd.to_datetime(latest.stat().st_mtime, unit="s").strftime("%d/%m/%Y %H:%M")
+    left, right = st.columns(2)
+    left.metric("Ultimo corte", cutoff_label)
+    right.metric("Generado", generated_at)
+    st.download_button(
+        "Descargar ultimo informe",
+        data=latest.read_bytes(),
+        file_name=latest.name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True,
+    )
+
+    history = pd.DataFrame(
+        [
+            {
+                "Archivo": path.name,
+                "Generado": pd.to_datetime(path.stat().st_mtime, unit="s").strftime("%d/%m/%Y %H:%M"),
+                "Tamano KB": round(path.stat().st_size / 1024, 1),
+            }
+            for path in reports[:12]
+        ]
+    )
+    st.markdown("#### Historial")
+    st.dataframe(history, hide_index=True, use_container_width=True)
+
+
 def build_action_radar(
     performance: pd.DataFrame,
     clients: pd.DataFrame,
@@ -2203,6 +2263,10 @@ with st.sidebar:
         with st.container(key="dm_nav_commissions"):
             if st.button("Comisiones y Parrilla P.", use_container_width=True):
                 st.session_state["pantalla_activa"] = "Comisiones"
+    if current_user.is_admin:
+        with st.container(key="dm_nav_weekly_reports"):
+            if st.button("Informes semanales", use_container_width=True):
+                st.session_state["pantalla_activa"] = "Informes semanales"
     pantalla_activa = st.session_state["pantalla_activa"]
 
     st.divider()
@@ -2319,6 +2383,10 @@ if pantalla_activa == "Historial Clientify":
 
 if pantalla_activa == "Comisiones":
     show_commissions(current_user, fecha_desde, fecha_hasta)
+    st.stop()
+
+if pantalla_activa == "Informes semanales":
+    show_weekly_reports(current_user)
     st.stop()
 
 periodo_dias = (fecha_hasta - fecha_desde).days + 1
