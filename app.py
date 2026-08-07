@@ -1763,21 +1763,20 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         )
         selected_vendor = st.selectbox("Vendedor", vendor_options)
         earns_commission = commissions.vendor_earns_commission(selected_vendor)
-        user_data = (
-            data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(selected_vendor))]
-            if earns_commission and result.enabled and not data.empty and "vendedor" in data.columns
-            else pd.DataFrame()
-        )
-        total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
-        st.metric("Comision Acumulada", money(total))
-        if result.enabled:
-            st.caption(f"Archivo: {result.source_name}")
-        if not earns_commission:
-            st.info("Modalidad sin comision en este indicador.")
-        elif not result.enabled:
-            st.info(result.message)
-        elif user_data.empty:
-            st.info("Sin comisiones registradas en el archivo cargado.")
+        if earns_commission:
+            user_data = (
+                data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(selected_vendor))]
+                if result.enabled and not data.empty and "vendedor" in data.columns
+                else pd.DataFrame()
+            )
+            total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
+            st.metric("Comision Acumulada", money(total))
+            if result.enabled:
+                st.caption(f"Archivo: {result.source_name}")
+            if not result.enabled:
+                st.info(result.message)
+            elif user_data.empty:
+                st.info("Sin comisiones registradas en el archivo cargado.")
         render_parrilla_progress(selected_vendor)
         return
 
@@ -1785,21 +1784,20 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
     if vendor is None:
         vendor = parrilla.canonical_vendor(current_user.name)
     earns_commission = commissions.user_earns_commission(current_user.username)
-    user_data = (
-        data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
-        if earns_commission and result.enabled and not data.empty and "vendedor" in data.columns
-        else pd.DataFrame()
-    )
-    total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
-    st.metric("Comision Acumulada", money(total))
-    if result.enabled:
-        st.caption(f"Archivo: {result.source_name}")
-    if not earns_commission:
-        st.info("Modalidad sin comision en este indicador.")
-    elif not result.enabled:
-        st.info(result.message)
-    elif user_data.empty:
-        st.info("Sin comisiones registradas en el archivo cargado.")
+    if earns_commission:
+        user_data = (
+            data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
+            if result.enabled and not data.empty and "vendedor" in data.columns
+            else pd.DataFrame()
+        )
+        total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
+        st.metric("Comision Acumulada", money(total))
+        if result.enabled:
+            st.caption(f"Archivo: {result.source_name}")
+        if not result.enabled:
+            st.info(result.message)
+        elif user_data.empty:
+            st.info("Sin comisiones registradas en el archivo cargado.")
     render_parrilla_progress(vendor)
 
 
