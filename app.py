@@ -1757,12 +1757,19 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         st.table(display_data.style.apply(style_lab_table, axis=1))
 
     if current_user.is_admin:
+        file_vendors = (
+            {parrilla.canonical_vendor(value) for value in data["vendedor"].dropna().astype(str)}
+            if not data.empty and "vendedor" in data.columns
+            else set()
+        )
         vendor_options = sorted(
             {parrilla.canonical_vendor(value) for value in commissions.USER_VENDOR_MAP.values()}
             | set(parrilla.available_vendors(parrilla_objectives))
+            | file_vendors
         )
         selected_vendor = st.selectbox("Vendedor", vendor_options)
-        if commissions.vendor_earns_commission(selected_vendor):
+        selected_has_commission = parrilla.canonical_vendor(selected_vendor) in file_vendors
+        if commissions.vendor_earns_commission(selected_vendor) or selected_has_commission:
             if not result.enabled:
                 st.info(result.message)
                 render_parrilla_progress(selected_vendor)
@@ -1779,12 +1786,16 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
     vendor = commissions.vendor_for_user(current_user.username)
     if vendor is None:
         vendor = parrilla.canonical_vendor(current_user.name)
-    if commissions.user_earns_commission(current_user.username):
+    user_data = (
+        data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
+        if result.enabled and not data.empty and "vendedor" in data.columns
+        else pd.DataFrame()
+    )
+    if commissions.user_earns_commission(current_user.username) or not user_data.empty:
         if not result.enabled:
             st.info(result.message)
             render_parrilla_progress(vendor)
             return
-        user_data = data[data["vendedor"].map(parrilla.canonical_vendor).eq(parrilla.canonical_vendor(vendor))]
         total = user_data["ventas_acumuladas"].sum() if not user_data.empty else 0
         st.metric("Comision Acumulada", money(total))
         st.caption(f"Archivo: {result.source_name}")
