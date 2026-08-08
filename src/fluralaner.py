@@ -33,9 +33,7 @@ SALES_ZONE_REASSIGNMENTS = {
 
 
 def load_objectives() -> pd.DataFrame:
-    if OBJECTIVES_PATH.exists():
-        df = pd.read_csv(OBJECTIVES_PATH)
-    elif ENCRYPTED_OBJECTIVES_PATH.exists():
+    if ENCRYPTED_OBJECTIVES_PATH.exists():
         key = siscor_db._snapshot_key()
         if not key:
             return pd.DataFrame(columns=REQUIRED_COLUMNS)
@@ -44,6 +42,8 @@ def load_objectives() -> pd.DataFrame:
         except (InvalidToken, ValueError) as exc:
             raise RuntimeError("La clave snapshot no puede abrir los objetivos de Fluralaner.") from exc
         df = pd.read_csv(BytesIO(content))
+    elif OBJECTIVES_PATH.exists():
+        df = pd.read_csv(OBJECTIVES_PATH)
     else:
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
