@@ -40,6 +40,7 @@ USER_VENDOR_MAP = {
 AUTHORIZED_USERS = set(USER_VENDOR_MAP)
 COMMISSIONED_USERS = {"carina", "javier", "jonatan", "juan", "juancruz", "micaela"}
 COMMISSIONED_VENDORS = {"Carina", "Javier", "Jonatan", "Juan Cruz M.", "Micaela"}
+SOURCE_VENDOR_ALIASES = {"JULIO M.": "Jonatan", "JULIO MARTINEZ": "Jonatan"}
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,7 @@ def _read_xlsx_bytes(content: bytes) -> pd.DataFrame:
         vendedor = str(item.get("vendedor", "")).strip()
         if not vendedor or vendedor.upper() == "TOTAL":
             continue
+        vendedor = SOURCE_VENDOR_ALIASES.get(vendedor.upper(), vendedor)
         cobranza = siscor_db._to_numeric_amount([item.get("comision cobranza", 0)]).iloc[0]
         ventas = siscor_db._to_numeric_amount([item.get("comision ventas", 0)]).iloc[0]
         parsed_rows.append(
