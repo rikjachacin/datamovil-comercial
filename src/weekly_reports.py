@@ -19,6 +19,7 @@ except ImportError:
     get_column_letter = None
 
 from src import anura_api, clientify_api, objectives, persat_api, siscor_db
+from src.simple_xlsx import build_workbook as build_simple_workbook
 
 
 REPORTS_DIR = Path("data/informes_semanales")
@@ -326,7 +327,7 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
 
 def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, week_start: date) -> bytes:
     if Workbook is None:
-        raise RuntimeError("Falta instalar openpyxl para generar el informe Excel.")
+        return build_simple_workbook(data, cutoff, month_start, week_start)
     workbook = Workbook()
     workbook.remove(workbook.active)
     used_titles: set[str] = set()
