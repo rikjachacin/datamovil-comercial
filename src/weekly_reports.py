@@ -10,6 +10,12 @@ import unicodedata
 import pandas as pd
 
 try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:
+    Fernet = None
+    InvalidToken = ValueError
+
+try:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -24,6 +30,19 @@ from src.simple_xlsx import build_workbook as build_simple_workbook
 
 REPORTS_DIR = Path("data/informes_semanales")
 REPORT_NAME_PATTERN = re.compile(r"Informe_Semanal_(\d{4}-\d{2}-\d{2})\.xlsx$")
+ITINERARY_PATH = Path("data/itinerario_vendedores_calle.xlsx")
+ENCRYPTED_ITINERARY_PATH = Path("data/itinerario_vendedores_calle.csv.enc")
+CALLS_DAILY_TARGET = 20
+PERFORMANCE_TOLERANCE = 0.05
+WEEKDAY_TO_OFFSET = {
+    "LUNES": 0,
+    "MARTES": 1,
+    "MIERCOLES": 2,
+    "JUEVES": 3,
+    "VIERNES": 4,
+    "SABADO": 5,
+    "DOMINGO": 6,
+}
 
 DISPLAY_NAMES = {
     "ZONA 13 JAVIER MOLARO": "JAVIER",
@@ -47,6 +66,9 @@ COLORS = {
     "note": "FFF4D6",
     "white": "FFFFFF",
     "red": "B42318",
+    "red_panel": "FEE2E2",
+    "green_panel": "DCFCE7",
+    "blue_panel": "DBEAFE",
 }
 
 
@@ -133,6 +155,104 @@ def _source_status(name: str, enabled: bool, message: str) -> str:
     return f"{name}: no disponible ({message})"
 
 
+def _performance_status(value: object) -> str:
+    numeric = pd.to_numeric(value, errors="coerce")
+    if pd.isna(numeric):
+        return "NO EVALUABLE"
+    if float(numeric) >= 1 + PERFORMANCE_TOLERANCE:
+        return "POR ENCIMA"
+    if float(numeric) >= 1 - PERFORMANCE_TOLERANCE:
+        return "EN LINEA"
+    return "POR DEBAJO"
+
+
+def _read_itinerary(path: Path = ITINERARY_PATH) -> pd.DataFrame:
+    columns = ["id_cliente", "vendedor", "dia_norm", "fecha_programada"]
+    raw = None
+    if ENCRYPTED_ITINERARY_PATH.exists() and Fernet is not None:
+        key = siscor_db._snapshot_key()
+        if key:
+            try:
+                payload = Fernet(key.encode("utf-8")).decrypt(ENCRYPTED_ITINERARY_PATH.read_bytes())
+                raw = pd.read_csv(BytesIO(payload))
+            except (InvalidToken, ValueError):
+                raw = None
+    if raw is None and path.exists():
+        try:
+            raw = pd.read_excel(path, sheet_name=0)
+        except Exception:
+            raw = None
+    if raw is None:
+        return pd.DataFrame(columns=columns)
+    frame = raw.rename(
+        columns={"Nro": "id_cliente", "Zona": "vendedor", "Dia de Visita": "dia_visita"}
+    )
+    required = ("id_cliente", "vendedor", "dia_visita")
+    if any(column not in frame.columns for column in required):
+        return pd.DataFrame(columns=columns)
+    frame = frame.loc[:, required].copy()
+    frame["id_cliente"] = (
+        frame["id_cliente"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    )
+    frame["vendedor"] = frame["vendedor"].fillna("").astype(str).str.strip().str.upper()
+    frame["dia_norm"] = frame["dia_visita"].map(_normalize)
+    frame = frame[
+        frame["id_cliente"].ne("")
+        & frame["vendedor"].ne("")
+        & frame["dia_norm"].isin(WEEKDAY_TO_OFFSET)
+    ].copy()
+    return frame.drop_duplicates(["id_cliente", "vendedor", "dia_norm"])
+
+
+def _planned_visits(
+    itinerary: pd.DataFrame,
+    zone: str,
+    week_start: date,
+    cutoff: date,
+) -> pd.DataFrame:
+    if itinerary.empty:
+        return pd.DataFrame(columns=["id_cliente", "fecha_programada"])
+    plan = itinerary[itinerary["vendedor"].map(_normalize).eq(_normalize(zone))].copy()
+    if plan.empty:
+        return pd.DataFrame(columns=["id_cliente", "fecha_programada"])
+    plan["fecha_programada"] = plan["dia_norm"].map(
+        lambda day: week_start + timedelta(days=WEEKDAY_TO_OFFSET[day])
+    )
+    plan = plan[plan["fecha_programada"].le(cutoff)].copy()
+    return plan.loc[:, ["id_cliente", "fecha_programada"]].drop_duplicates()
+
+
+def _visit_performance(visits: pd.DataFrame, plan: pd.DataFrame) -> dict[str, object]:
+    expected = int(len(plan)) if not plan.empty else None
+    if visits.empty:
+        return {
+            "visitas": 0,
+            "visitas_programadas": expected,
+            "visitas_cumplidas": 0 if expected is not None else None,
+            "visitas_fuera_itinerario": 0 if expected is not None else None,
+        }
+    actual = visits.copy()
+    actual["id_cliente"] = actual["id_cliente"].fillna("").astype(str).str.strip()
+    actual["fecha_visita"] = pd.to_datetime(actual["fecha"], errors="coerce").dt.date
+    actual_keys = actual.loc[
+        actual["id_cliente"].ne("") & actual["fecha_visita"].notna(),
+        ["id_cliente", "fecha_visita"],
+    ].drop_duplicates()
+    if expected is None:
+        completed = outside = None
+    else:
+        plan_keys = plan.rename(columns={"fecha_programada": "fecha_visita"})
+        merged = actual_keys.merge(plan_keys.assign(programada=True), on=["id_cliente", "fecha_visita"], how="left")
+        completed = int(merged["programada"].fillna(False).sum())
+        outside = int(merged["programada"].isna().sum())
+    return {
+        "visitas": int(len(actual)),
+        "visitas_programadas": expected,
+        "visitas_cumplidas": completed,
+        "visitas_fuera_itinerario": outside,
+    }
+
+
 def _activity_data(week_start: date, cutoff: date, zones: tuple[str, ...]) -> dict[str, dict[str, object]]:
     output: dict[str, dict[str, object]] = {}
     telemarketing_zones = tuple(zone for zone in zones if _is_telemarketing(zone))
@@ -146,13 +266,25 @@ def _activity_data(week_start: date, cutoff: date, zones: tuple[str, ...]) -> di
     )
     persat_zones = tuple(zone for zone in street_zones if str(zone).strip().upper() in persat_api.ZONE_DEVICE_MAP)
     persat_result = persat_api.activity(week_start.isoformat(), cutoff.isoformat(), persat_zones)
+    itinerary = _read_itinerary()
+    expected_calls = int(objectives.business_days_between(week_start, cutoff) * CALLS_DAILY_TARGET)
 
     for zone in telemarketing_zones:
+        calls = _calls_for_zone(anura_result.calls, zone) if anura_result.enabled else None
+        calls_pace = calls / expected_calls if calls is not None and expected_calls else None
         output[zone] = {
             "modalidad": "Telemarketing",
-            "llamadas": _calls_for_zone(anura_result.calls, zone) if anura_result.enabled else None,
+            "llamadas": calls,
+            "llamadas_esperadas": expected_calls,
+            "ritmo_llamadas": calls_pace,
+            "estado_llamadas": _performance_status(calls_pace),
             "contactos": _contacts_for_zone(clientify_result.by_owner, zone) if clientify_result.enabled else None,
             "visitas": None,
+            "visitas_programadas": None,
+            "visitas_cumplidas": None,
+            "visitas_fuera_itinerario": None,
+            "ritmo_visitas": None,
+            "estado_visitas": "NO EVALUABLE",
             "fuentes_actividad": " | ".join(
                 [
                     _source_status("Anura", anura_result.enabled, anura_result.message),
@@ -167,21 +299,51 @@ def _activity_data(week_start: date, cutoff: date, zones: tuple[str, ...]) -> di
             output[zone] = {
                 "modalidad": "Vendedor de calle",
                 "llamadas": None,
+                "llamadas_esperadas": None,
+                "ritmo_llamadas": None,
+                "estado_llamadas": "NO EVALUABLE",
                 "contactos": None,
                 "visitas": None,
+                "visitas_programadas": None,
+                "visitas_cumplidas": None,
+                "visitas_fuera_itinerario": None,
+                "ritmo_visitas": None,
+                "estado_visitas": "NO EVALUABLE",
                 "fuentes_actividad": "Persat: sin dispositivo asociado a esta zona",
             }
             continue
         visits = persat_result.visits
-        visit_count = None
+        plan = _planned_visits(itinerary, zone, week_start, cutoff)
+        visit_values = {
+            "visitas": None,
+            "visitas_programadas": int(len(plan)) if not plan.empty else None,
+            "visitas_cumplidas": None,
+            "visitas_fuera_itinerario": None,
+        }
         if persat_result.enabled:
-            visit_count = int(visits["device_id"].isin(device_ids).sum()) if not visits.empty else 0
+            zone_visits = visits[visits["device_id"].isin(device_ids)].copy() if not visits.empty else visits
+            visit_values = _visit_performance(zone_visits, plan)
+        expected_visits = visit_values["visitas_programadas"]
+        completed_visits = visit_values["visitas_cumplidas"]
+        visit_pace = (
+            completed_visits / expected_visits
+            if completed_visits is not None and expected_visits
+            else None
+        )
         output[zone] = {
             "modalidad": "Vendedor de calle",
             "llamadas": None,
+            "llamadas_esperadas": None,
+            "ritmo_llamadas": None,
+            "estado_llamadas": "NO EVALUABLE",
             "contactos": None,
-            "visitas": visit_count,
-            "fuentes_actividad": _source_status("Persat", persat_result.enabled, persat_result.message),
+            **visit_values,
+            "ritmo_visitas": visit_pace,
+            "estado_visitas": _performance_status(visit_pace),
+            "fuentes_actividad": (
+                f"{_source_status('Persat', persat_result.enabled, persat_result.message)}"
+                f" | Itinerario: {'OK' if expected_visits is not None else 'sin clientes asignados'}"
+            ),
         }
 
     return output
@@ -217,8 +379,31 @@ def collect_report_data(cutoff: date) -> tuple[pd.DataFrame, date, date]:
         axis=1,
     )
     base["nombre"] = base["zona"].map(_display_name)
+    month_progress = objectives.month_progress(cutoff)
+    base["avance_esperado_mes"] = month_progress
+    base["facturacion_esperada"] = base["objetivo"] * month_progress
+    base["ritmo_ventas"] = base.apply(
+        lambda row: float(row["total"] / row["facturacion_esperada"])
+        if row["facturacion_esperada"]
+        else None,
+        axis=1,
+    )
+    base["estado_ventas"] = base["ritmo_ventas"].map(_performance_status)
     base["modalidad"] = base["zona"].map(lambda zone: activity[str(zone)]["modalidad"])
-    for column in ("llamadas", "contactos", "visitas", "fuentes_actividad"):
+    for column in (
+        "llamadas",
+        "llamadas_esperadas",
+        "ritmo_llamadas",
+        "estado_llamadas",
+        "contactos",
+        "visitas",
+        "visitas_programadas",
+        "visitas_cumplidas",
+        "visitas_fuera_itinerario",
+        "ritmo_visitas",
+        "estado_visitas",
+        "fuentes_actividad",
+    ):
         base[column] = base["zona"].map(lambda zone, key=column: activity[str(zone)][key])
     return base.sort_values("nombre").reset_index(drop=True), month_start, week_start
 
@@ -252,10 +437,81 @@ def _style_merged(
     cell.alignment = Alignment(horizontal=horizontal, vertical="center", wrap_text=True)
 
 
+def _status_style(status: str) -> tuple[str, str]:
+    if status == "POR ENCIMA":
+        return COLORS["green_panel"], "166534"
+    if status == "EN LINEA":
+        return COLORS["blue_panel"], "1D4ED8"
+    if status == "POR DEBAJO":
+        return COLORS["red_panel"], COLORS["red"]
+    return COLORS["panel"], COLORS["muted"]
+
+
+def _write_metric_row(
+    sheet,
+    row_number: int,
+    label: str,
+    actual: object,
+    expected: object,
+    performance: object,
+    status: str,
+    *,
+    actual_format: str = "#,##0",
+    expected_format: str = "#,##0",
+) -> None:
+    values = [
+        (f"A{row_number}:B{row_number}", label, COLORS["panel"], COLORS["ink"], "left", None),
+        (f"C{row_number}:D{row_number}", actual, COLORS["white"], COLORS["ink"], "center", actual_format),
+        (f"E{row_number}:F{row_number}", expected, COLORS["white"], COLORS["ink"], "center", expected_format),
+        (f"G{row_number}:H{row_number}", performance, COLORS["white"], COLORS["ink"], "center", "0.0%"),
+    ]
+    for address, value, fill, color, horizontal, number_format in values:
+        display_value = "N/D" if value is None or pd.isna(value) else value
+        _merge_value(sheet, address, display_value)
+        _style_merged(
+            sheet,
+            address,
+            fill=fill,
+            color=color,
+            size=10,
+            bold=address.startswith("A"),
+            horizontal=horizontal,
+        )
+        if number_format and isinstance(display_value, (int, float)):
+            sheet[address.split(":", 1)[0]].number_format = number_format
+    fill, color = _status_style(status)
+    _merge_value(sheet, f"I{row_number}:J{row_number}", status)
+    _style_merged(sheet, f"I{row_number}:J{row_number}", fill=fill, color=color, size=9, bold=True)
+
+
+def _seller_reading(row: pd.Series) -> str:
+    sales = (
+        f"Ventas {row['estado_ventas'].lower()}: lleva {float(row['ritmo_ventas']):.1%} "
+        "del nivel esperado al corte."
+    )
+    if row["modalidad"] == "Telemarketing":
+        calls = "Llamadas: dato no disponible."
+        if not pd.isna(row["ritmo_llamadas"]):
+            calls = (
+                f"Llamadas {str(row['estado_llamadas']).lower()}: "
+                f"{int(row['llamadas'])} de {int(row['llamadas_esperadas'])} esperadas."
+            )
+        return f"{sales} {calls} Los contactos se informan sin calificación porque no tienen una meta formal."
+    if pd.isna(row["visitas_programadas"]):
+        return f"{sales} Las visitas no se califican porque esta zona no tiene itinerario cargado."
+    if pd.isna(row["visitas_cumplidas"]):
+        return f"{sales} Persat no estuvo disponible para evaluar el cumplimiento del itinerario."
+    return (
+        f"{sales} Visitas {str(row['estado_visitas']).lower()}: cumplió "
+        f"{int(row['visitas_cumplidas'])} de {int(row['visitas_programadas'])} visitas programadas; "
+        f"registró {int(row['visitas_fuera_itinerario'])} fuera del itinerario."
+    )
+
+
 def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, week_start: date) -> None:
     sheet.sheet_view.showGridLines = False
     sheet.freeze_panes = "A5"
-    sheet.print_area = "A1:J19"
+    sheet.print_area = "A1:J27"
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.page_setup.orientation = "landscape"
     sheet.page_setup.fitToWidth = 1
@@ -279,7 +535,6 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
 
     _merge_value(sheet, "A6:J6", "RESULTADO COMERCIAL ACUMULADO DEL MES")
     _style_merged(sheet, "A6:J6", fill=COLORS["teal"], color=COLORS["white"], size=11, bold=True, horizontal="left")
-
     cards = [
         ("A7:B7", "A8:B9", "Objetivo mensual", float(row["objetivo"]), COLORS["navy"], '"$"#,##0'),
         ("C7:D7", "C8:D9", "Facturación acumulada", float(row["total"]), COLORS["blue"], '"$"#,##0'),
@@ -294,34 +549,66 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
         _style_merged(sheet, value_address, fill=COLORS["panel"], color=COLORS["ink"], size=15, bold=True)
         sheet[value_address.split(":", 1)[0]].number_format = number_format
 
-    _merge_value(sheet, "A11:J11", "ACTIVIDAD DE LA SEMANA")
+    expected_progress = float(row["avance_esperado_mes"])
+    _merge_value(sheet, "A11:J11", f"RENDIMIENTO ESPERADO AL CORTE ({expected_progress:.1%} DEL MES HÁBIL)")
     _style_merged(sheet, "A11:J11", fill=COLORS["teal"], color=COLORS["white"], size=11, bold=True, horizontal="left")
+    headers = [
+        ("A12:B12", "Indicador"),
+        ("C12:D12", "Resultado real"),
+        ("E12:F12", "Esperado al corte"),
+        ("G12:H12", "Rendimiento"),
+        ("I12:J12", "Estado"),
+    ]
+    for address, label in headers:
+        _merge_value(sheet, address, label)
+        _style_merged(sheet, address, fill=COLORS["navy"], color=COLORS["white"], size=9, bold=True)
+    _write_metric_row(
+        sheet,
+        13,
+        "Facturación",
+        float(row["total"]),
+        float(row["facturacion_esperada"]),
+        row["ritmo_ventas"],
+        str(row["estado_ventas"]),
+        actual_format='"$"#,##0',
+        expected_format='"$"#,##0',
+    )
+
+    _merge_value(sheet, "A15:J15", "ACTIVIDAD DE LA SEMANA")
+    _style_merged(sheet, "A15:J15", fill=COLORS["teal"], color=COLORS["white"], size=11, bold=True, horizontal="left")
+    for address, label in [(item[0].replace("12", "16"), item[1]) for item in headers]:
+        _merge_value(sheet, address, label)
+        _style_merged(sheet, address, fill=COLORS["navy"], color=COLORS["white"], size=9, bold=True)
     if row["modalidad"] == "Telemarketing":
-        activity_cards = [
-            ("A13:E13", "A14:E15", "Llamadas realizadas (Anura)", row["llamadas"], COLORS["blue"]),
-            ("F13:J13", "F14:J15", "Contactos únicos (Clientify)", row["contactos"], COLORS["green"]),
-        ]
+        _write_metric_row(sheet, 17, "Llamadas salientes (Anura)", row["llamadas"], row["llamadas_esperadas"], row["ritmo_llamadas"], str(row["estado_llamadas"]))
+        _write_metric_row(sheet, 18, "Contactos únicos (Clientify)", row["contactos"], "Sin meta definida", None, "NO EVALUABLE")
+    elif pd.isna(row["visitas_programadas"]):
+        _write_metric_row(sheet, 17, "Visitas registradas (Persat)", row["visitas"], "Sin itinerario", None, "NO EVALUABLE")
     else:
-        activity_cards = [
-            ("A13:J13", "A14:J15", "Visitas registradas (Persat)", row["visitas"], COLORS["amber"]),
-        ]
-    for label_address, value_address, label, value, color in activity_cards:
-        _merge_value(sheet, label_address, label)
-        _style_merged(sheet, label_address, fill=color, color=COLORS["white"], size=10, bold=True)
-        _merge_value(sheet, value_address, "N/D" if pd.isna(value) else int(value))
-        _style_merged(sheet, value_address, fill=COLORS["panel"], color=COLORS["ink"], size=18, bold=True)
-        if not pd.isna(value):
-            sheet[value_address.split(":", 1)[0]].number_format = "#,##0"
+        _write_metric_row(sheet, 17, "Visitas de itinerario cumplidas", row["visitas_cumplidas"], row["visitas_programadas"], row["ritmo_visitas"], str(row["estado_visitas"]))
+        _write_metric_row(sheet, 18, "Visitas registradas (Persat)", row["visitas"], "Dato informativo", None, "NO EVALUABLE")
+        _write_metric_row(sheet, 19, "Visitas fuera del itinerario", row["visitas_fuera_itinerario"], "Dato informativo", None, "NO EVALUABLE")
 
-    _merge_value(sheet, "A17:J17", "FUENTES DEL INFORME")
-    _style_merged(sheet, "A17:J17", fill="E8EEF5", color=COLORS["navy"], size=9, bold=True, horizontal="left")
+    _merge_value(sheet, "A21:J21", "LECTURA PARA EL VENDEDOR")
+    _style_merged(sheet, "A21:J21", fill=COLORS["teal"], color=COLORS["white"], size=10, bold=True, horizontal="left")
+    _merge_value(sheet, "A22:J22", _seller_reading(row))
+    _style_merged(sheet, "A22:J22", fill=COLORS["panel"], color=COLORS["ink"], size=9, horizontal="left")
+    _merge_value(sheet, "A23:J23", "Criterio: POR ENCIMA ≥ 105% | EN LÍNEA 95% a 104,9% | POR DEBAJO < 95%.")
+    _style_merged(sheet, "A23:J23", fill=COLORS["white"], color=COLORS["muted"], size=8, horizontal="left")
+
+    _merge_value(sheet, "A25:J25", "FUENTES DEL INFORME")
+    _style_merged(sheet, "A25:J25", fill="E8EEF5", color=COLORS["navy"], size=9, bold=True, horizontal="left")
     sources = f"SisCor (solo lectura): facturación, comprobantes y unidades | {row['fuentes_actividad']}"
-    _merge_value(sheet, "A18:J18", sources)
-    _style_merged(sheet, "A18:J18", fill=COLORS["white"], color=COLORS["muted"], size=9, horizontal="left")
-    _merge_value(sheet, "A19:J19", f"Generado por Bruncas Comercial el {datetime.now():%d/%m/%Y %H:%M}")
-    _style_merged(sheet, "A19:J19", fill=COLORS["white"], color=COLORS["muted"], size=8, horizontal="left")
+    _merge_value(sheet, "A26:J26", sources)
+    _style_merged(sheet, "A26:J26", fill=COLORS["white"], color=COLORS["muted"], size=8, horizontal="left")
+    _merge_value(sheet, "A27:J27", f"Generado por Bruncas Comercial el {datetime.now():%d/%m/%Y %H:%M}")
+    _style_merged(sheet, "A27:J27", fill=COLORS["white"], color=COLORS["muted"], size=8, horizontal="left")
 
-    for row_number, height in {1: 32, 2: 24, 3: 22, 4: 21, 6: 23, 7: 23, 8: 28, 9: 28, 11: 23, 13: 23, 14: 29, 15: 29, 17: 22, 18: 27, 19: 20}.items():
+    for row_number, height in {
+        1: 30, 2: 22, 3: 21, 4: 20, 6: 21, 7: 21, 8: 25, 9: 25,
+        11: 21, 12: 21, 13: 25, 15: 21, 16: 21, 17: 24, 18: 24, 19: 24,
+        21: 21, 22: 34, 23: 19, 25: 20, 26: 27, 27: 18,
+    }.items():
         sheet.row_dimensions[row_number].height = height
 
 

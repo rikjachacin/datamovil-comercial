@@ -22,3 +22,8 @@ Objetivos comerciales:
 - `objetivos.csv` se usa localmente para cargar metas mensuales por zona.
 - Debe tener columnas `mes`, `zona`, `objetivo`.
 - `objetivos.example.csv` muestra el formato esperado.
+
+Itinerario de vendedores de calle:
+
+- `itinerario_vendedores_calle.xlsx` es la fuente local de clientes y dias asignados.
+- `itinerario_vendedores_calle.csv.enc` es la copia cifrada usada por los informes semanales publicados.
