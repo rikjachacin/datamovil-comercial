@@ -28,7 +28,13 @@ def _row(number: int, cells: list[str], height: int | None = None) -> str:
 
 
 def _status_style(status: str) -> int:
-    return {"POR ENCIMA": 22, "EN LINEA": 23, "POR DEBAJO": 24}.get(status, 25)
+    return {
+        "POR ENCIMA": 22,
+        "EN LINEA": 23,
+        "POR DEBAJO": 24,
+        "REVISAR DATOS": 24,
+        "SIN DIFERENCIAS": 22,
+    }.get(status, 25)
 
 
 def _metric_row(
@@ -75,9 +81,10 @@ def _seller_reading(row: pd.Series) -> str:
     if pd.isna(row["visitas_cumplidas"]):
         return f"{sales} Persat no estuvo disponible para evaluar el cumplimiento del itinerario."
     return (
-        f"{sales} Visitas {str(row['estado_visitas']).lower()}: cumplio "
-        f"{int(row['visitas_cumplidas'])} de {int(row['visitas_programadas'])} visitas programadas; "
-        f"registro {int(row['visitas_fuera_itinerario'])} fuera del itinerario."
+        f"{sales} Registro {int(row['visitas'])} visitas: cumplio "
+        f"{int(row['visitas_cumplidas'])} de {int(row['visitas_programadas'])} programadas, "
+        f"realizo {int(row['visitas_fuera_itinerario'])} fuera del itinerario y "
+        f"quedaron {int(row['visitas_sin_clasificar'])} sin clasificar."
     )
 
 
@@ -125,8 +132,8 @@ def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, period_start: da
         _row(16, [
             _cell("A16", "Indicador", 17),
             _cell("C16", "Resultado real", 17),
-            _cell("E16", "Esperado al corte", 17),
-            _cell("G16", "Rendimiento", 17),
+            _cell("E16", "Base de comparacion", 17),
+            _cell("G16", "Porcentaje", 17),
             _cell("I16", "Estado", 17),
         ], 21),
     ]
@@ -136,10 +143,17 @@ def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, period_start: da
             _metric_row(18, "Contactos unicos (Clientify)", row["contactos"], "Sin meta definida", None, "NO EVALUABLE"),
         ])
     elif has_itinerary:
+        unclassified = pd.to_numeric(row["visitas_sin_clasificar"], errors="coerce")
+        unclassified_status = (
+            "REVISAR DATOS"
+            if pd.notna(unclassified) and float(unclassified) > 0
+            else "SIN DIFERENCIAS"
+        )
         rows.extend([
-            _metric_row(17, "Visitas de itinerario cumplidas", row["visitas_cumplidas"], row["visitas_programadas"], row["ritmo_visitas"], str(row["estado_visitas"])),
-            _metric_row(18, "Visitas registradas (Persat)", row["visitas"], "Dato informativo", None, "NO EVALUABLE"),
-            _metric_row(19, "Visitas fuera del itinerario", row["visitas_fuera_itinerario"], "Dato informativo", None, "NO EVALUABLE"),
+            _metric_row(17, "Visitas programadas cumplidas", row["visitas_cumplidas"], row["visitas_programadas"], row["ritmo_visitas"], str(row["estado_visitas"])),
+            _metric_row(18, "Total de visitas realizadas", row["visitas"], row["visitas_programadas"], row["ritmo_visitas_totales"], str(row["estado_visitas_totales"])),
+            _metric_row(19, "Visitas fuera del itinerario", row["visitas_fuera_itinerario"], row["visitas"], row["porcentaje_fuera_itinerario"], "DATO DE CONTROL"),
+            _metric_row(20, "Visitas sin clasificar", row["visitas_sin_clasificar"], "-", "-", unclassified_status),
         ])
     else:
         rows.append(_metric_row(17, "Visitas registradas (Persat)", row["visitas"], "Sin itinerario", None, "NO EVALUABLE"))
@@ -165,7 +179,10 @@ def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, period_start: da
     if activity_is_phone or has_itinerary:
         merges.extend(["A18:B18", "C18:D18", "E18:F18", "G18:H18", "I18:J18"])
     if not activity_is_phone and has_itinerary:
-        merges.extend(["A19:B19", "C19:D19", "E19:F19", "G19:H19", "I19:J19"])
+        merges.extend([
+            "A19:B19", "C19:D19", "E19:F19", "G19:H19", "I19:J19",
+            "A20:B20", "C20:D20", "E20:F20", "G20:H20", "I20:J20",
+        ])
     merge_xml = "".join(f'<mergeCell ref="{item}"/>' for item in merges)
     return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">

@@ -242,6 +242,7 @@ def _visit_performance(visits: pd.DataFrame, plan: pd.DataFrame) -> dict[str, ob
             "visitas_programadas": expected,
             "visitas_cumplidas": 0 if expected is not None else None,
             "visitas_fuera_itinerario": 0 if expected is not None else None,
+            "visitas_sin_clasificar": 0 if expected is not None else None,
         }
     actual = visits.copy()
     actual["id_cliente"] = actual["id_cliente"].fillna("").astype(str).str.strip()
@@ -251,17 +252,19 @@ def _visit_performance(visits: pd.DataFrame, plan: pd.DataFrame) -> dict[str, ob
         ["id_cliente", "fecha_visita"],
     ].drop_duplicates()
     if expected is None:
-        completed = outside = None
+        completed = outside = unclassified = None
     else:
         plan_keys = plan.rename(columns={"fecha_programada": "fecha_visita"})
         merged = actual_keys.merge(plan_keys.assign(programada=True), on=["id_cliente", "fecha_visita"], how="left")
         completed = int(merged["programada"].fillna(False).sum())
         outside = int(merged["programada"].isna().sum())
+        unclassified = max(int(len(actual)) - completed - outside, 0)
     return {
         "visitas": int(len(actual)),
         "visitas_programadas": expected,
         "visitas_cumplidas": completed,
         "visitas_fuera_itinerario": outside,
+        "visitas_sin_clasificar": unclassified,
     }
 
 
@@ -295,8 +298,12 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
             "visitas_programadas": None,
             "visitas_cumplidas": None,
             "visitas_fuera_itinerario": None,
+            "visitas_sin_clasificar": None,
             "ritmo_visitas": None,
             "estado_visitas": "NO EVALUABLE",
+            "ritmo_visitas_totales": None,
+            "estado_visitas_totales": "NO EVALUABLE",
+            "porcentaje_fuera_itinerario": None,
             "fuentes_actividad": " | ".join(
                 [
                     _source_status("Anura", anura_result.enabled, anura_result.message),
@@ -319,8 +326,12 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
                 "visitas_programadas": None,
                 "visitas_cumplidas": None,
                 "visitas_fuera_itinerario": None,
+                "visitas_sin_clasificar": None,
                 "ritmo_visitas": None,
                 "estado_visitas": "NO EVALUABLE",
+                "ritmo_visitas_totales": None,
+                "estado_visitas_totales": "NO EVALUABLE",
+                "porcentaje_fuera_itinerario": None,
                 "fuentes_actividad": "Persat: sin dispositivo asociado a esta zona",
             }
             continue
@@ -331,15 +342,28 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
             "visitas_programadas": int(len(plan)) if not plan.empty else None,
             "visitas_cumplidas": None,
             "visitas_fuera_itinerario": None,
+            "visitas_sin_clasificar": None,
         }
         if persat_result.enabled:
             zone_visits = visits[visits["device_id"].isin(device_ids)].copy() if not visits.empty else visits
             visit_values = _visit_performance(zone_visits, plan)
         expected_visits = visit_values["visitas_programadas"]
         completed_visits = visit_values["visitas_cumplidas"]
+        total_visits = visit_values["visitas"]
+        outside_visits = visit_values["visitas_fuera_itinerario"]
         visit_pace = (
             completed_visits / expected_visits
             if completed_visits is not None and expected_visits
+            else None
+        )
+        total_visit_pace = (
+            total_visits / expected_visits
+            if total_visits is not None and expected_visits
+            else None
+        )
+        outside_share = (
+            outside_visits / total_visits
+            if outside_visits is not None and total_visits
             else None
         )
         output[zone] = {
@@ -352,6 +376,9 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
             **visit_values,
             "ritmo_visitas": visit_pace,
             "estado_visitas": _performance_status(visit_pace),
+            "ritmo_visitas_totales": total_visit_pace,
+            "estado_visitas_totales": _performance_status(total_visit_pace),
+            "porcentaje_fuera_itinerario": outside_share,
             "fuentes_actividad": (
                 f"{_source_status('Persat', persat_result.enabled, persat_result.message)}"
                 f" | Itinerario: {'OK' if expected_visits is not None else 'sin clientes asignados'}"
@@ -414,8 +441,12 @@ def collect_report_data(cutoff: date, period_start: date | None = None) -> tuple
         "visitas_programadas",
         "visitas_cumplidas",
         "visitas_fuera_itinerario",
+        "visitas_sin_clasificar",
         "ritmo_visitas",
         "estado_visitas",
+        "ritmo_visitas_totales",
+        "estado_visitas_totales",
+        "porcentaje_fuera_itinerario",
         "fuentes_actividad",
     ):
         base[column] = base["zona"].map(lambda zone, key=column: activity[str(zone)][key])
@@ -458,6 +489,12 @@ def _status_style(status: str) -> tuple[str, str]:
         return COLORS["blue_panel"], "1D4ED8"
     if status == "POR DEBAJO":
         return COLORS["red_panel"], COLORS["red"]
+    if status == "REVISAR DATOS":
+        return COLORS["red_panel"], COLORS["red"]
+    if status == "SIN DIFERENCIAS":
+        return COLORS["green_panel"], "166534"
+    if status == "DATO DE CONTROL":
+        return COLORS["note"], "8A4B08"
     return COLORS["panel"], COLORS["muted"]
 
 
@@ -516,9 +553,10 @@ def _seller_reading(row: pd.Series) -> str:
     if pd.isna(row["visitas_cumplidas"]):
         return f"{sales} Persat no estuvo disponible para evaluar el cumplimiento del itinerario."
     return (
-        f"{sales} Visitas {str(row['estado_visitas']).lower()}: cumplió "
-        f"{int(row['visitas_cumplidas'])} de {int(row['visitas_programadas'])} visitas programadas; "
-        f"registró {int(row['visitas_fuera_itinerario'])} fuera del itinerario."
+        f"{sales} Registró {int(row['visitas'])} visitas: cumplió "
+        f"{int(row['visitas_cumplidas'])} de {int(row['visitas_programadas'])} programadas, "
+        f"realizó {int(row['visitas_fuera_itinerario'])} fuera del itinerario y "
+        f"quedaron {int(row['visitas_sin_clasificar'])} sin clasificar."
     )
 
 
@@ -590,7 +628,14 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
 
     _merge_value(sheet, "A15:J15", "ACTIVIDAD DEL PERIODO SELECCIONADO")
     _style_merged(sheet, "A15:J15", fill=COLORS["teal"], color=COLORS["white"], size=11, bold=True, horizontal="left")
-    for address, label in [(item[0].replace("12", "16"), item[1]) for item in headers]:
+    activity_headers = [
+        ("A16:B16", "Indicador"),
+        ("C16:D16", "Resultado real"),
+        ("E16:F16", "Base de comparación"),
+        ("G16:H16", "Porcentaje"),
+        ("I16:J16", "Estado"),
+    ]
+    for address, label in activity_headers:
         _merge_value(sheet, address, label)
         _style_merged(sheet, address, fill=COLORS["navy"], color=COLORS["white"], size=9, bold=True)
     if row["modalidad"] == "Telemarketing":
@@ -599,9 +644,16 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
     elif pd.isna(row["visitas_programadas"]):
         _write_metric_row(sheet, 17, "Visitas registradas (Persat)", row["visitas"], "Sin itinerario", None, "NO EVALUABLE")
     else:
-        _write_metric_row(sheet, 17, "Visitas de itinerario cumplidas", row["visitas_cumplidas"], row["visitas_programadas"], row["ritmo_visitas"], str(row["estado_visitas"]))
-        _write_metric_row(sheet, 18, "Visitas registradas (Persat)", row["visitas"], "Dato informativo", None, "NO EVALUABLE")
-        _write_metric_row(sheet, 19, "Visitas fuera del itinerario", row["visitas_fuera_itinerario"], "Dato informativo", None, "NO EVALUABLE")
+        _write_metric_row(sheet, 17, "Visitas programadas cumplidas", row["visitas_cumplidas"], row["visitas_programadas"], row["ritmo_visitas"], str(row["estado_visitas"]))
+        _write_metric_row(sheet, 18, "Total de visitas realizadas", row["visitas"], row["visitas_programadas"], row["ritmo_visitas_totales"], str(row["estado_visitas_totales"]))
+        _write_metric_row(sheet, 19, "Visitas fuera del itinerario", row["visitas_fuera_itinerario"], row["visitas"], row["porcentaje_fuera_itinerario"], "DATO DE CONTROL")
+        unclassified = pd.to_numeric(row["visitas_sin_clasificar"], errors="coerce")
+        unclassified_status = (
+            "REVISAR DATOS"
+            if pd.notna(unclassified) and float(unclassified) > 0
+            else "SIN DIFERENCIAS"
+        )
+        _write_metric_row(sheet, 20, "Visitas sin clasificar", row["visitas_sin_clasificar"], "-", "-", unclassified_status)
 
     _merge_value(sheet, "A21:J21", "LECTURA PARA EL VENDEDOR")
     _style_merged(sheet, "A21:J21", fill=COLORS["teal"], color=COLORS["white"], size=10, bold=True, horizontal="left")
@@ -620,7 +672,7 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
 
     for row_number, height in {
         1: 30, 2: 22, 3: 21, 4: 20, 6: 21, 7: 21, 8: 25, 9: 25,
-        11: 21, 12: 21, 13: 25, 15: 21, 16: 21, 17: 24, 18: 24, 19: 24,
+        11: 21, 12: 21, 13: 25, 15: 21, 16: 21, 17: 24, 18: 24, 19: 24, 20: 24,
         21: 21, 22: 34, 23: 19, 25: 20, 26: 27, 27: 18,
     }.items():
         sheet.row_dimensions[row_number].height = height
