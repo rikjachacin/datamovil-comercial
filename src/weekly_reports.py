@@ -823,3 +823,29 @@ def list_reports(output_dir: Path = REPORTS_DIR) -> list[Path]:
 def latest_report(output_dir: Path = REPORTS_DIR) -> Path | None:
     reports = list_reports(output_dir)
     return reports[0] if reports else None
+
+
+def cleanup_reports_generated_on(target_date: date, output_dir: Path = REPORTS_DIR) -> int:
+    if not output_dir.exists():
+        return 0
+    marker = output_dir / f".cleanup_{target_date:%Y-%m-%d}.done"
+    if marker.exists():
+        return 0
+
+    removed = 0
+    failed = False
+    for path in list_reports(output_dir):
+        generated_date = datetime.fromtimestamp(path.stat().st_mtime).date()
+        if generated_date != target_date:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            failed = True
+    if not failed:
+        marker.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    return removed
+
+
+cleanup_reports_generated_on(date(2026, 8, 24))
