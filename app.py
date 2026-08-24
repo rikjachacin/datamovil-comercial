@@ -1842,7 +1842,6 @@ def show_weekly_reports(current_user: auth.User) -> None:
     )
     if not valid_period:
         st.error("La fecha desde no puede ser posterior a la fecha hasta.")
-    generated_path: Path | None = None
     if st.button(
         "Generar informe",
         type="primary",
@@ -1852,19 +1851,41 @@ def show_weekly_reports(current_user: auth.User) -> None:
         with st.spinner("Consultando SisCor, Anura, Clientify y Persat..."):
             result = weekly_reports.generate_report(cutoff, period_start=period_start)
         if result.enabled:
-            generated_path = result.path
-            st.success(f"Informe generado: {result.path.name}")
+            generated_data = result.path.read_bytes()
+            st.session_state["weekly_report_latest_download"] = {
+                "name": result.path.name,
+                "data": generated_data,
+                "generated_at": pd.to_datetime(
+                    result.path.stat().st_mtime, unit="s"
+                ).strftime("%d/%m/%Y %H:%M"),
+            }
+            st.success(
+                f"Informe registrado para el periodo {period_start:%d/%m/%Y} al "
+                f"{cutoff:%d/%m/%Y}."
+            )
         else:
             st.error("No se pudo generar el informe.")
             st.code(result.message)
 
     reports = weekly_reports.list_reports()
-    if not reports:
+    session_report = st.session_state.get("weekly_report_latest_download")
+    if not reports and not session_report:
         st.info("Todavia no hay informes semanales generados.")
         return
 
-    latest = generated_path if generated_path is not None else reports[0]
-    report_period = weekly_reports.report_period(latest)
+    if session_report:
+        latest_name = str(session_report["name"])
+        latest_data = bytes(session_report["data"])
+        generated_at = str(session_report["generated_at"])
+    else:
+        latest = reports[0]
+        latest_name = latest.name
+        latest_data = latest.read_bytes()
+        generated_at = pd.to_datetime(
+            latest.stat().st_mtime, unit="s"
+        ).strftime("%d/%m/%Y %H:%M")
+
+    report_period = weekly_reports.report_period(Path(latest_name))
     if report_period:
         report_start, report_cutoff = report_period
         cutoff_label = report_cutoff.strftime("%d/%m/%Y")
@@ -1874,30 +1895,45 @@ def show_weekly_reports(current_user: auth.User) -> None:
             else cutoff_label
         )
     else:
-        period_label = latest.stem
-    generated_at = pd.to_datetime(latest.stat().st_mtime, unit="s").strftime("%d/%m/%Y %H:%M")
+        period_label = Path(latest_name).stem
     left, right = st.columns(2)
     left.metric("Ultimo periodo", period_label)
     right.metric("Generado", generated_at)
+    if report_period and (report_start != period_start or report_cutoff != cutoff):
+        st.info(
+            "El informe mostrado corresponde al periodo indicado arriba. "
+            "Para obtener las fechas seleccionadas actualmente, pulsa Generar informe."
+        )
     st.download_button(
-        "Descargar ultimo informe",
-        data=latest.read_bytes(),
-        file_name=latest.name,
+        "Descargar informe mostrado",
+        data=latest_data,
+        file_name=latest_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
         use_container_width=True,
     )
 
-    history = pd.DataFrame(
-        [
+    history_rows = []
+    for path in reports[:12]:
+        path_period = weekly_reports.report_period(path)
+        path_start, path_cutoff = path_period if path_period else (None, None)
+        history_rows.append(
             {
+                "Desde": path_start.strftime("%d/%m/%Y") if path_start else "No registrado",
+                "Hasta": path_cutoff.strftime("%d/%m/%Y") if path_cutoff else "No registrado",
+                "Ventas acumuladas": (
+                    f"01/{path_cutoff:%m/%Y} al {path_cutoff:%d/%m/%Y}"
+                    if path_cutoff
+                    else "No registrado"
+                ),
                 "Archivo": path.name,
-                "Generado": pd.to_datetime(path.stat().st_mtime, unit="s").strftime("%d/%m/%Y %H:%M"),
+                "Generado": pd.to_datetime(path.stat().st_mtime, unit="s").strftime(
+                    "%d/%m/%Y %H:%M"
+                ),
                 "Tamano KB": round(path.stat().st_size / 1024, 1),
             }
-            for path in reports[:12]
-        ]
-    )
+        )
+    history = pd.DataFrame(history_rows)
     st.markdown("#### Historial")
     st.dataframe(history, hide_index=True, use_container_width=True)
 

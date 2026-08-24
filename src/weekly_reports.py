@@ -164,6 +164,14 @@ def _historical_contact_targets(
     current_week_start = period_start - timedelta(days=period_start.weekday())
     history_end = current_week_start - timedelta(days=1)
     history_start = history_end - timedelta(days=(CONTACT_HISTORY_WEEKS * 7) - 1)
+    history_sync = clientify_api.inbox_activity(
+        history_start.isoformat(),
+        history_end.isoformat(),
+        zones,
+    )
+    if not history_sync.enabled:
+        return targets, False, history_sync.message
+
     contact_totals = {zone: 0 for zone in zones}
     historical_business_days = 0.0
     for week_index in range(CONTACT_HISTORY_WEEKS):
@@ -173,6 +181,7 @@ def _historical_contact_targets(
             week_start.isoformat(),
             week_end.isoformat(),
             zones,
+            refresh_cache=False,
         )
         if not week_result.enabled:
             return targets, False, week_result.message
@@ -312,15 +321,16 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
     street_zones = tuple(zone for zone in zones if not _is_telemarketing(zone))
 
     anura_result = anura_api.calls(period_start.isoformat(), cutoff.isoformat(), telemarketing_zones)
-    clientify_result = clientify_api.inbox_activity(
-        period_start.isoformat(),
-        cutoff.isoformat(),
-        telemarketing_zones,
-    )
     contact_targets, contact_history_enabled, contact_history_message = _historical_contact_targets(
         period_start,
         cutoff,
         telemarketing_zones,
+    )
+    clientify_result = clientify_api.inbox_activity(
+        period_start.isoformat(),
+        cutoff.isoformat(),
+        telemarketing_zones,
+        refresh_cache=not contact_history_enabled,
     )
     persat_zones = tuple(zone for zone in street_zones if str(zone).strip().upper() in persat_api.ZONE_DEVICE_MAP)
     persat_result = persat_api.activity(period_start.isoformat(), cutoff.isoformat(), persat_zones)
@@ -823,29 +833,3 @@ def list_reports(output_dir: Path = REPORTS_DIR) -> list[Path]:
 def latest_report(output_dir: Path = REPORTS_DIR) -> Path | None:
     reports = list_reports(output_dir)
     return reports[0] if reports else None
-
-
-def cleanup_reports_generated_on(target_date: date, output_dir: Path = REPORTS_DIR) -> int:
-    if not output_dir.exists():
-        return 0
-    marker = output_dir / f".cleanup_{target_date:%Y-%m-%d}.done"
-    if marker.exists():
-        return 0
-
-    removed = 0
-    failed = False
-    for path in list_reports(output_dir):
-        generated_date = datetime.fromtimestamp(path.stat().st_mtime).date()
-        if generated_date != target_date:
-            continue
-        try:
-            path.unlink()
-            removed += 1
-        except OSError:
-            failed = True
-    if not failed:
-        marker.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
-    return removed
-
-
-cleanup_reports_generated_on(date(2026, 8, 24))

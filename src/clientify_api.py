@@ -580,7 +580,13 @@ def _activity_from_cache(
     )
 
 
-def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str, ...] = ()) -> ClientifyActivity:
+def inbox_activity(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zones: tuple[str, ...] = (),
+    *,
+    refresh_cache: bool = True,
+) -> ClientifyActivity:
     try:
         start_date = datetime.fromisoformat(fecha_desde_sql).date()
         end_date = datetime.fromisoformat(fecha_hasta_sql).date()
@@ -600,7 +606,8 @@ def inbox_activity(fecha_desde_sql: str, fecha_hasta_sql: str, zones: tuple[str,
             [],
         )
     try:
-        _sync_activity_cache(start_dt, scopes)
+        if refresh_cache:
+            _sync_activity_cache(start_dt, scopes)
         summary, by_day, by_owner = _activity_from_cache(start_dt, end_dt, scopes)
     except Exception as exc:
         return ClientifyActivity(False, str(exc), {}, [], [])
