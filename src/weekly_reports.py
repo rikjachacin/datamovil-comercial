@@ -35,6 +35,7 @@ REPORT_NAME_PATTERN = re.compile(
 ITINERARY_PATH = Path("data/itinerario_vendedores_calle.xlsx")
 ENCRYPTED_ITINERARY_PATH = Path("data/itinerario_vendedores_calle.csv.enc")
 CALLS_DAILY_TARGET = 20
+CONTACT_HISTORY_WEEKS = 8
 PERFORMANCE_TOLERANCE = 0.05
 WEEKDAY_TO_OFFSET = {
     "LUNES": 0,
@@ -149,6 +150,43 @@ def _contacts_for_zone(by_owner: list[dict[str, object]], zone: str) -> int:
             if pd.notna(contacts):
                 total += int(contacts)
     return total
+
+
+def _historical_contact_targets(
+    period_start: date,
+    cutoff: date,
+    zones: tuple[str, ...],
+) -> tuple[dict[str, int | None], bool, str]:
+    targets: dict[str, int | None] = {zone: None for zone in zones}
+    if not zones:
+        return targets, True, "No hay telemarketers seleccionados."
+
+    current_week_start = period_start - timedelta(days=period_start.weekday())
+    history_end = current_week_start - timedelta(days=1)
+    history_start = history_end - timedelta(days=(CONTACT_HISTORY_WEEKS * 7) - 1)
+    contact_totals = {zone: 0 for zone in zones}
+    historical_business_days = 0.0
+    for week_index in range(CONTACT_HISTORY_WEEKS):
+        week_start = history_start + timedelta(days=week_index * 7)
+        week_end = week_start + timedelta(days=6)
+        week_result = clientify_api.inbox_activity(
+            week_start.isoformat(),
+            week_end.isoformat(),
+            zones,
+        )
+        if not week_result.enabled:
+            return targets, False, week_result.message
+        historical_business_days += objectives.business_days_between(week_start, week_end)
+        for zone in zones:
+            contact_totals[zone] += _contacts_for_zone(week_result.by_owner, zone)
+
+    selected_business_days = objectives.business_days_between(period_start, cutoff)
+    if not historical_business_days or not selected_business_days:
+        return targets, False, "No hay días hábiles suficientes para calcular la referencia histórica."
+    for zone in zones:
+        daily_average = contact_totals[zone] / historical_business_days
+        targets[zone] = int(round(daily_average * selected_business_days))
+    return targets, True, "Promedio de las 8 semanas completas anteriores."
 
 
 def _source_status(name: str, enabled: bool, message: str) -> str:
@@ -279,6 +317,11 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
         cutoff.isoformat(),
         telemarketing_zones,
     )
+    contact_targets, contact_history_enabled, contact_history_message = _historical_contact_targets(
+        period_start,
+        cutoff,
+        telemarketing_zones,
+    )
     persat_zones = tuple(zone for zone in street_zones if str(zone).strip().upper() in persat_api.ZONE_DEVICE_MAP)
     persat_result = persat_api.activity(period_start.isoformat(), cutoff.isoformat(), persat_zones)
     itinerary = _read_itinerary()
@@ -287,13 +330,23 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
     for zone in telemarketing_zones:
         calls = _calls_for_zone(anura_result.calls, zone) if anura_result.enabled else None
         calls_pace = calls / expected_calls if calls is not None and expected_calls else None
+        contacts = _contacts_for_zone(clientify_result.by_owner, zone) if clientify_result.enabled else None
+        expected_contacts = contact_targets.get(zone) if contact_history_enabled else None
+        contacts_pace = (
+            contacts / expected_contacts
+            if contacts is not None and expected_contacts
+            else None
+        )
         output[zone] = {
             "modalidad": "Telemarketing",
             "llamadas": calls,
             "llamadas_esperadas": expected_calls,
             "ritmo_llamadas": calls_pace,
             "estado_llamadas": _performance_status(calls_pace),
-            "contactos": _contacts_for_zone(clientify_result.by_owner, zone) if clientify_result.enabled else None,
+            "contactos": contacts,
+            "contactos_esperados": expected_contacts,
+            "ritmo_contactos": contacts_pace,
+            "estado_contactos": _performance_status(contacts_pace),
             "visitas": None,
             "visitas_programadas": None,
             "visitas_cumplidas": None,
@@ -308,6 +361,11 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
                 [
                     _source_status("Anura", anura_result.enabled, anura_result.message),
                     _source_status("Clientify", clientify_result.enabled, clientify_result.message),
+                    _source_status(
+                        "Referencia Clientify 8 semanas",
+                        contact_history_enabled,
+                        contact_history_message,
+                    ),
                 ]
             ),
         }
@@ -322,6 +380,9 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
                 "ritmo_llamadas": None,
                 "estado_llamadas": "NO EVALUABLE",
                 "contactos": None,
+                "contactos_esperados": None,
+                "ritmo_contactos": None,
+                "estado_contactos": "NO EVALUABLE",
                 "visitas": None,
                 "visitas_programadas": None,
                 "visitas_cumplidas": None,
@@ -373,6 +434,9 @@ def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> 
             "ritmo_llamadas": None,
             "estado_llamadas": "NO EVALUABLE",
             "contactos": None,
+            "contactos_esperados": None,
+            "ritmo_contactos": None,
+            "estado_contactos": "NO EVALUABLE",
             **visit_values,
             "ritmo_visitas": visit_pace,
             "estado_visitas": _performance_status(visit_pace),
@@ -437,6 +501,9 @@ def collect_report_data(cutoff: date, period_start: date | None = None) -> tuple
         "ritmo_llamadas",
         "estado_llamadas",
         "contactos",
+        "contactos_esperados",
+        "ritmo_contactos",
+        "estado_contactos",
         "visitas",
         "visitas_programadas",
         "visitas_cumplidas",
@@ -547,7 +614,14 @@ def _seller_reading(row: pd.Series) -> str:
                 f"Llamadas {str(row['estado_llamadas']).lower()}: "
                 f"{int(row['llamadas'])} de {int(row['llamadas_esperadas'])} esperadas."
             )
-        return f"{sales} {calls} Los contactos se informan sin calificación porque no tienen una meta formal."
+        contacts = "Contactos: referencia histórica no disponible."
+        if not pd.isna(row["ritmo_contactos"]):
+            contacts = (
+                f"Contactos {str(row['estado_contactos']).lower()}: "
+                f"{int(row['contactos'])} frente a {int(row['contactos_esperados'])} esperados "
+                "según las 8 semanas anteriores."
+            )
+        return f"{sales} {calls} {contacts}"
     if pd.isna(row["visitas_programadas"]):
         return f"{sales} Las visitas no se califican porque esta zona no tiene itinerario cargado."
     if pd.isna(row["visitas_cumplidas"]):
@@ -640,7 +714,10 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
         _style_merged(sheet, address, fill=COLORS["navy"], color=COLORS["white"], size=9, bold=True)
     if row["modalidad"] == "Telemarketing":
         _write_metric_row(sheet, 17, "Llamadas salientes (Anura)", row["llamadas"], row["llamadas_esperadas"], row["ritmo_llamadas"], str(row["estado_llamadas"]))
-        _write_metric_row(sheet, 18, "Contactos únicos (Clientify)", row["contactos"], "Sin meta definida", None, "NO EVALUABLE")
+        if pd.notna(row["ritmo_contactos"]):
+            _write_metric_row(sheet, 18, "Contactos únicos (Clientify)", row["contactos"], row["contactos_esperados"], row["ritmo_contactos"], str(row["estado_contactos"]))
+        else:
+            _write_metric_row(sheet, 18, "Contactos únicos (Clientify)", row["contactos"], row["contactos_esperados"], "-", "SIN BASE HISTÓRICA")
     elif pd.isna(row["visitas_programadas"]):
         _write_metric_row(sheet, 17, "Visitas registradas (Persat)", row["visitas"], "Sin itinerario", None, "NO EVALUABLE")
     else:

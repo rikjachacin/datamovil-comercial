@@ -75,7 +75,14 @@ def _seller_reading(row: pd.Series) -> str:
                 f"Llamadas {str(row['estado_llamadas']).lower()}: "
                 f"{int(row['llamadas'])} de {int(row['llamadas_esperadas'])} esperadas."
             )
-        return f"{sales} {calls} Los contactos se informan sin calificacion porque no tienen una meta formal."
+        contacts = "Contactos: referencia historica no disponible."
+        if not pd.isna(row["ritmo_contactos"]):
+            contacts = (
+                f"Contactos {str(row['estado_contactos']).lower()}: "
+                f"{int(row['contactos'])} frente a {int(row['contactos_esperados'])} esperados "
+                "segun las 8 semanas anteriores."
+            )
+        return f"{sales} {calls} {contacts}"
     if pd.isna(row["visitas_programadas"]):
         return f"{sales} Las visitas no se califican porque esta zona no tiene itinerario cargado."
     if pd.isna(row["visitas_cumplidas"]):
@@ -138,9 +145,15 @@ def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, period_start: da
         ], 21),
     ]
     if activity_is_phone:
+        contacts_expected = row["contactos_esperados"]
+        contacts_performance = row["ritmo_contactos"]
+        contacts_status = str(row["estado_contactos"])
+        if pd.isna(contacts_performance):
+            contacts_performance = "-"
+            contacts_status = "SIN BASE HISTORICA"
         rows.extend([
             _metric_row(17, "Llamadas salientes (Anura)", row["llamadas"], row["llamadas_esperadas"], row["ritmo_llamadas"], str(row["estado_llamadas"])),
-            _metric_row(18, "Contactos unicos (Clientify)", row["contactos"], "Sin meta definida", None, "NO EVALUABLE"),
+            _metric_row(18, "Contactos unicos (Clientify)", row["contactos"], contacts_expected, contacts_performance, contacts_status),
         ])
     elif has_itinerary:
         unclassified = pd.to_numeric(row["visitas_sin_clasificar"], errors="coerce")
