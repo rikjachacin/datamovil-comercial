@@ -16,9 +16,11 @@ from src import weekly_reports  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description="Genera el informe semanal de vendedores.")
     parser.add_argument("--fecha", help="Fecha de corte YYYY-MM-DD; por defecto usa hoy.")
+    parser.add_argument("--desde", help="Inicio de actividad YYYY-MM-DD; por defecto usa el lunes.")
     args = parser.parse_args()
     cutoff = date.fromisoformat(args.fecha) if args.fecha else date.today()
-    result = weekly_reports.generate_report(cutoff)
+    period_start = date.fromisoformat(args.desde) if args.desde else None
+    result = weekly_reports.generate_report(cutoff, period_start=period_start)
     if not result.enabled:
         print(f"ERROR: {result.message}", file=sys.stderr)
         return 1

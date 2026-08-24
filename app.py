@@ -1817,9 +1817,38 @@ def show_weekly_reports(current_user: auth.User) -> None:
         return
 
     st.caption("Programado: sabados a las 09:00 (hora de Argentina)")
-    if st.button("Generar informe ahora", type="primary", use_container_width=False):
+    today = date.today()
+    default_start = today - timedelta(days=today.weekday())
+    start_column, end_column = st.columns(2)
+    period_start = start_column.date_input(
+        "Desde",
+        value=default_start,
+        max_value=today,
+        format="DD/MM/YYYY",
+        key="weekly_report_period_start",
+    )
+    cutoff = end_column.date_input(
+        "Hasta",
+        value=today,
+        max_value=today,
+        format="DD/MM/YYYY",
+        key="weekly_report_cutoff",
+    )
+    valid_period = period_start <= cutoff
+    st.caption(
+        "Facturacion, unidades y ticket: acumulados desde el inicio del mes de la fecha hasta. "
+        "Llamadas, contactos y visitas: solo dentro del rango seleccionado."
+    )
+    if not valid_period:
+        st.error("La fecha desde no puede ser posterior a la fecha hasta.")
+    if st.button(
+        "Generar informe",
+        type="primary",
+        use_container_width=False,
+        disabled=not valid_period,
+    ):
         with st.spinner("Consultando SisCor, Anura, Clientify y Persat..."):
-            result = weekly_reports.generate_report(date.today())
+            result = weekly_reports.generate_report(cutoff, period_start=period_start)
         if result.enabled:
             st.success(f"Informe generado: {result.path.name}")
         else:
@@ -1832,11 +1861,20 @@ def show_weekly_reports(current_user: auth.User) -> None:
         return
 
     latest = reports[0]
-    match = weekly_reports.REPORT_NAME_PATTERN.match(latest.name)
-    cutoff_label = pd.to_datetime(match.group(1)).strftime("%d/%m/%Y") if match else latest.stem
+    report_period = weekly_reports.report_period(latest)
+    if report_period:
+        report_start, report_cutoff = report_period
+        cutoff_label = report_cutoff.strftime("%d/%m/%Y")
+        period_label = (
+            f"{report_start:%d/%m/%Y} al {report_cutoff:%d/%m/%Y}"
+            if report_start
+            else cutoff_label
+        )
+    else:
+        period_label = latest.stem
     generated_at = pd.to_datetime(latest.stat().st_mtime, unit="s").strftime("%d/%m/%Y %H:%M")
     left, right = st.columns(2)
-    left.metric("Ultimo corte", cutoff_label)
+    left.metric("Ultimo periodo", period_label)
     right.metric("Generado", generated_at)
     st.download_button(
         "Descargar ultimo informe",

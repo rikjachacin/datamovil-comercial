@@ -29,7 +29,9 @@ from src.simple_xlsx import build_workbook as build_simple_workbook
 
 
 REPORTS_DIR = Path("data/informes_semanales")
-REPORT_NAME_PATTERN = re.compile(r"Informe_Semanal_(\d{4}-\d{2}-\d{2})\.xlsx$")
+REPORT_NAME_PATTERN = re.compile(
+    r"Informe_Semanal_(?:(\d{4}-\d{2}-\d{2})_al_)?(\d{4}-\d{2}-\d{2})\.xlsx$"
+)
 ITINERARY_PATH = Path("data/itinerario_vendedores_calle.xlsx")
 ENCRYPTED_ITINERARY_PATH = Path("data/itinerario_vendedores_calle.csv.enc")
 CALLS_DAILY_TARGET = 20
@@ -207,7 +209,7 @@ def _read_itinerary(path: Path = ITINERARY_PATH) -> pd.DataFrame:
 def _planned_visits(
     itinerary: pd.DataFrame,
     zone: str,
-    week_start: date,
+    period_start: date,
     cutoff: date,
 ) -> pd.DataFrame:
     if itinerary.empty:
@@ -215,11 +217,21 @@ def _planned_visits(
     plan = itinerary[itinerary["vendedor"].map(_normalize).eq(_normalize(zone))].copy()
     if plan.empty:
         return pd.DataFrame(columns=["id_cliente", "fecha_programada"])
-    plan["fecha_programada"] = plan["dia_norm"].map(
-        lambda day: week_start + timedelta(days=WEEKDAY_TO_OFFSET[day])
-    )
-    plan = plan[plan["fecha_programada"].le(cutoff)].copy()
-    return plan.loc[:, ["id_cliente", "fecha_programada"]].drop_duplicates()
+    dates_by_weekday: dict[str, list[date]] = {day: [] for day in WEEKDAY_TO_OFFSET}
+    current = period_start
+    while current <= cutoff:
+        for day, weekday in WEEKDAY_TO_OFFSET.items():
+            if current.weekday() == weekday:
+                dates_by_weekday[day].append(current)
+                break
+        current += timedelta(days=1)
+
+    rows = [
+        {"id_cliente": item.id_cliente, "fecha_programada": scheduled}
+        for item in plan.itertuples(index=False)
+        for scheduled in dates_by_weekday.get(item.dia_norm, [])
+    ]
+    return pd.DataFrame(rows, columns=["id_cliente", "fecha_programada"]).drop_duplicates()
 
 
 def _visit_performance(visits: pd.DataFrame, plan: pd.DataFrame) -> dict[str, object]:
@@ -253,21 +265,21 @@ def _visit_performance(visits: pd.DataFrame, plan: pd.DataFrame) -> dict[str, ob
     }
 
 
-def _activity_data(week_start: date, cutoff: date, zones: tuple[str, ...]) -> dict[str, dict[str, object]]:
+def _activity_data(period_start: date, cutoff: date, zones: tuple[str, ...]) -> dict[str, dict[str, object]]:
     output: dict[str, dict[str, object]] = {}
     telemarketing_zones = tuple(zone for zone in zones if _is_telemarketing(zone))
     street_zones = tuple(zone for zone in zones if not _is_telemarketing(zone))
 
-    anura_result = anura_api.calls(week_start.isoformat(), cutoff.isoformat(), telemarketing_zones)
+    anura_result = anura_api.calls(period_start.isoformat(), cutoff.isoformat(), telemarketing_zones)
     clientify_result = clientify_api.inbox_activity(
-        week_start.isoformat(),
+        period_start.isoformat(),
         cutoff.isoformat(),
         telemarketing_zones,
     )
     persat_zones = tuple(zone for zone in street_zones if str(zone).strip().upper() in persat_api.ZONE_DEVICE_MAP)
-    persat_result = persat_api.activity(week_start.isoformat(), cutoff.isoformat(), persat_zones)
+    persat_result = persat_api.activity(period_start.isoformat(), cutoff.isoformat(), persat_zones)
     itinerary = _read_itinerary()
-    expected_calls = int(objectives.business_days_between(week_start, cutoff) * CALLS_DAILY_TARGET)
+    expected_calls = int(objectives.business_days_between(period_start, cutoff) * CALLS_DAILY_TARGET)
 
     for zone in telemarketing_zones:
         calls = _calls_for_zone(anura_result.calls, zone) if anura_result.enabled else None
@@ -313,7 +325,7 @@ def _activity_data(week_start: date, cutoff: date, zones: tuple[str, ...]) -> di
             }
             continue
         visits = persat_result.visits
-        plan = _planned_visits(itinerary, zone, week_start, cutoff)
+        plan = _planned_visits(itinerary, zone, period_start, cutoff)
         visit_values = {
             "visitas": None,
             "visitas_programadas": int(len(plan)) if not plan.empty else None,
@@ -349,9 +361,11 @@ def _activity_data(week_start: date, cutoff: date, zones: tuple[str, ...]) -> di
     return output
 
 
-def collect_report_data(cutoff: date) -> tuple[pd.DataFrame, date, date]:
+def collect_report_data(cutoff: date, period_start: date | None = None) -> tuple[pd.DataFrame, date, date]:
     month_start = cutoff.replace(day=1)
-    week_start = cutoff - timedelta(days=cutoff.weekday())
+    period_start = period_start or cutoff - timedelta(days=cutoff.weekday())
+    if period_start > cutoff:
+        raise ValueError("La fecha desde no puede ser posterior a la fecha hasta.")
     month = objectives.month_key(cutoff)
     objective_rows = objectives.load_objectives()
     objective_rows = objective_rows[objective_rows["mes"].eq(month)].copy()
@@ -361,7 +375,7 @@ def collect_report_data(cutoff: date) -> tuple[pd.DataFrame, date, date]:
     zones = tuple(objective_rows["zona"].dropna().astype(str))
     sales = siscor_db.ventas_por_zona(month_start.isoformat(), cutoff.isoformat(), zones)
     units = siscor_db.unidades_por_zona(month_start.isoformat(), cutoff.isoformat(), zones)
-    activity = _activity_data(week_start, cutoff, zones)
+    activity = _activity_data(period_start, cutoff, zones)
 
     base = objective_rows.loc[:, ["zona", "objetivo"]].copy()
     sales_columns = ["zona", "total", "comprobantes", "clientes"]
@@ -405,7 +419,7 @@ def collect_report_data(cutoff: date) -> tuple[pd.DataFrame, date, date]:
         "fuentes_actividad",
     ):
         base[column] = base["zona"].map(lambda zone, key=column: activity[str(zone)][key])
-    return base.sort_values("nombre").reset_index(drop=True), month_start, week_start
+    return base.sort_values("nombre").reset_index(drop=True), month_start, period_start
 
 
 def _merge_value(sheet, address: str, value: object) -> None:
@@ -508,7 +522,7 @@ def _seller_reading(row: pd.Series) -> str:
     )
 
 
-def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, week_start: date) -> None:
+def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, period_start: date) -> None:
     sheet.sheet_view.showGridLines = False
     sheet.freeze_panes = "A5"
     sheet.print_area = "A1:J27"
@@ -526,7 +540,7 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
     _style_merged(sheet, "A2:J2", fill=COLORS["navy"], color=COLORS["white"], size=12, bold=True)
     period = (
         f"Corte: {cutoff:%d/%m/%Y}  |  Ventas: {month_start:%d/%m/%Y} al {cutoff:%d/%m/%Y}"
-        f"  |  Actividad: {week_start:%d/%m/%Y} al {cutoff:%d/%m/%Y}"
+        f"  |  Actividad: {period_start:%d/%m/%Y} al {cutoff:%d/%m/%Y}"
     )
     _merge_value(sheet, "A3:J3", period)
     _style_merged(sheet, "A3:J3", fill="E8EEF5", color=COLORS["ink"], size=10)
@@ -574,7 +588,7 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
         expected_format='"$"#,##0',
     )
 
-    _merge_value(sheet, "A15:J15", "ACTIVIDAD DE LA SEMANA")
+    _merge_value(sheet, "A15:J15", "ACTIVIDAD DEL PERIODO SELECCIONADO")
     _style_merged(sheet, "A15:J15", fill=COLORS["teal"], color=COLORS["white"], size=11, bold=True, horizontal="left")
     for address, label in [(item[0].replace("12", "16"), item[1]) for item in headers]:
         _merge_value(sheet, address, label)
@@ -612,9 +626,9 @@ def _write_seller_sheet(sheet, row: pd.Series, cutoff: date, month_start: date, 
         sheet.row_dimensions[row_number].height = height
 
 
-def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, week_start: date) -> bytes:
+def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, period_start: date) -> bytes:
     if Workbook is None:
-        return build_simple_workbook(data, cutoff, month_start, week_start)
+        return build_simple_workbook(data, cutoff, month_start, period_start)
     workbook = Workbook()
     workbook.remove(workbook.active)
     used_titles: set[str] = set()
@@ -627,24 +641,38 @@ def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, week_sta
             suffix += 1
         used_titles.add(title)
         sheet = workbook.create_sheet(title)
-        _write_seller_sheet(sheet, row, cutoff, month_start, week_start)
+        _write_seller_sheet(sheet, row, cutoff, month_start, period_start)
 
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
 
 
-def report_filename(cutoff: date) -> str:
-    return f"Informe_Semanal_{cutoff:%Y-%m-%d}.xlsx"
+def report_filename(cutoff: date, period_start: date | None = None) -> str:
+    if period_start is None:
+        return f"Informe_Semanal_{cutoff:%Y-%m-%d}.xlsx"
+    return f"Informe_Semanal_{period_start:%Y-%m-%d}_al_{cutoff:%Y-%m-%d}.xlsx"
 
 
-def generate_report(cutoff: date | None = None, output_dir: Path = REPORTS_DIR) -> WeeklyReportResult:
+def report_period(path: Path) -> tuple[date | None, date] | None:
+    match = REPORT_NAME_PATTERN.match(path.name)
+    if not match:
+        return None
+    period_start = date.fromisoformat(match.group(1)) if match.group(1) else None
+    return period_start, date.fromisoformat(match.group(2))
+
+
+def generate_report(
+    cutoff: date | None = None,
+    output_dir: Path = REPORTS_DIR,
+    period_start: date | None = None,
+) -> WeeklyReportResult:
     cutoff = cutoff or date.today()
     try:
-        data, month_start, week_start = collect_report_data(cutoff)
-        content = build_workbook(data, cutoff, month_start, week_start)
+        data, month_start, effective_period_start = collect_report_data(cutoff, period_start)
+        content = build_workbook(data, cutoff, month_start, effective_period_start)
         output_dir.mkdir(parents=True, exist_ok=True)
-        path = output_dir / report_filename(cutoff)
+        path = output_dir / report_filename(cutoff, period_start)
         temporary = path.with_suffix(".xlsx.tmp")
         temporary.write_bytes(content)
         temporary.replace(path)
@@ -658,7 +686,7 @@ def list_reports(output_dir: Path = REPORTS_DIR) -> list[Path]:
         return []
     return sorted(
         (path for path in output_dir.glob("Informe_Semanal_*.xlsx") if REPORT_NAME_PATTERN.match(path.name)),
-        key=lambda path: path.name,
+        key=lambda path: (report_period(path)[1], path.stat().st_mtime),
         reverse=True,
     )
 

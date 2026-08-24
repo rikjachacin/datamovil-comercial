@@ -81,10 +81,10 @@ def _seller_reading(row: pd.Series) -> str:
     )
 
 
-def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, week_start: date) -> str:
+def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, period_start: date) -> str:
     sales_period = (
         f"Corte: {cutoff:%d/%m/%Y}  |  Ventas: {month_start:%d/%m/%Y} al {cutoff:%d/%m/%Y}"
-        f"  |  Actividad: {week_start:%d/%m/%Y} al {cutoff:%d/%m/%Y}"
+        f"  |  Actividad: {period_start:%d/%m/%Y} al {cutoff:%d/%m/%Y}"
     )
     sources = f"SisCor (solo lectura): facturacion, comprobantes y unidades | {row['fuentes_actividad']}"
     activity_is_phone = row["modalidad"] == "Telemarketing"
@@ -121,7 +121,7 @@ def _sheet_xml(row: pd.Series, cutoff: date, month_start: date, week_start: date
             _cell("I12", "Estado", 17),
         ], 21),
         _metric_row(13, "Facturacion", float(row["total"]), float(row["facturacion_esperada"]), row["ritmo_ventas"], str(row["estado_ventas"]), money=True),
-        _row(15, [_cell("A15", "ACTIVIDAD DE LA SEMANA", 5)], 21),
+        _row(15, [_cell("A15", "ACTIVIDAD DEL PERIODO SELECCIONADO", 5)], 21),
         _row(16, [
             _cell("A16", "Indicador", 17),
             _cell("C16", "Resultado real", 17),
@@ -252,7 +252,7 @@ def _styles_xml() -> str:
 </styleSheet>'''
 
 
-def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, week_start: date) -> bytes:
+def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, period_start: date) -> bytes:
     titles: list[str] = []
     used: set[str] = set()
     for raw in data["nombre"].astype(str):
@@ -292,7 +292,7 @@ def build_workbook(data: pd.DataFrame, cutoff: date, month_start: date, week_sta
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{workbook_rels}</Relationships>''')
         archive.writestr("xl/styles.xml", _styles_xml())
         for index, (_, row) in enumerate(data.iterrows(), 1):
-            archive.writestr(f"xl/worksheets/sheet{index}.xml", _sheet_xml(row, cutoff, month_start, week_start))
+            archive.writestr(f"xl/worksheets/sheet{index}.xml", _sheet_xml(row, cutoff, month_start, period_start))
         archive.writestr("docProps/core.xml", f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>Bruncas Comercial</dc:creator><cp:lastModifiedBy>Bruncas Comercial</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:modified></cp:coreProperties>''')
         archive.writestr("docProps/app.xml", f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
