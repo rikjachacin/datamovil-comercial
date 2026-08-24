@@ -815,7 +815,7 @@ def list_reports(output_dir: Path = REPORTS_DIR) -> list[Path]:
         return []
     return sorted(
         (path for path in output_dir.glob("Informe_Semanal_*.xlsx") if REPORT_NAME_PATTERN.match(path.name)),
-        key=lambda path: (report_period(path)[1], path.stat().st_mtime),
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
         reverse=True,
     )
 

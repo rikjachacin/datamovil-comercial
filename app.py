@@ -1841,6 +1841,7 @@ def show_weekly_reports(current_user: auth.User) -> None:
     )
     if not valid_period:
         st.error("La fecha desde no puede ser posterior a la fecha hasta.")
+    generated_path: Path | None = None
     if st.button(
         "Generar informe",
         type="primary",
@@ -1850,6 +1851,7 @@ def show_weekly_reports(current_user: auth.User) -> None:
         with st.spinner("Consultando SisCor, Anura, Clientify y Persat..."):
             result = weekly_reports.generate_report(cutoff, period_start=period_start)
         if result.enabled:
+            generated_path = result.path
             st.success(f"Informe generado: {result.path.name}")
         else:
             st.error("No se pudo generar el informe.")
@@ -1860,7 +1862,7 @@ def show_weekly_reports(current_user: auth.User) -> None:
         st.info("Todavia no hay informes semanales generados.")
         return
 
-    latest = reports[0]
+    latest = generated_path if generated_path is not None else reports[0]
     report_period = weekly_reports.report_period(latest)
     if report_period:
         report_start, report_cutoff = report_period
