@@ -30,6 +30,7 @@ PRODUCT_START_DATES = {
 SALES_ZONE_REASSIGNMENTS = {
     "FRANCISCO": "JUAN C. MANZELLI",
 }
+BIT_TRIO_DISPLAY_UNITS = 25
 
 
 def load_objectives() -> pd.DataFrame:
@@ -73,6 +74,20 @@ def reassign_sales_zones(sales: pd.DataFrame) -> pd.DataFrame:
     normalized = out["zona"].fillna("").astype(str).str.strip().str.upper()
     for source_zone, target_zone in SALES_ZONE_REASSIGNMENTS.items():
         out.loc[normalized.eq(source_zone), "zona"] = target_zone
+    return out
+
+
+def convert_display_units(sales: pd.DataFrame) -> pd.DataFrame:
+    """Convert Bit Trio displays to the individual units used by campaign goals."""
+    if sales.empty or not {"producto", "presentacion", "unidades"}.issubset(sales.columns):
+        return sales.copy()
+
+    out = sales.copy()
+    products = out["producto"].fillna("").astype(str).str.strip().str.upper()
+    presentations = out["presentacion"].fillna("").astype(str).str.strip().str.upper()
+    display_mask = products.eq("BIT TRIO") & presentations.str.contains("DISPLAY", regex=False)
+    out["unidades"] = pd.to_numeric(out["unidades"], errors="coerce").fillna(0)
+    out.loc[display_mask, "unidades"] *= BIT_TRIO_DISPLAY_UNITS
     return out
 
 

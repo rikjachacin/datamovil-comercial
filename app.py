@@ -1499,6 +1499,7 @@ def show_fluralaner_metrics(
     had_sales = not detail.empty
     for column in ("unidades", "facturacion", "clientes"):
         detail[column] = pd.to_numeric(detail[column], errors="coerce").fillna(0)
+    detail = fluralaner.convert_display_units(detail)
 
     product_order = list(fluralaner.PRODUCT_ORDER)
     if seller_view:
