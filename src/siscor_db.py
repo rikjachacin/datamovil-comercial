@@ -77,6 +77,13 @@ SALES_TOTAL_NEUTRALIZED_DOCUMENTS = (
         "note": "Operacion informada 230258: descuenta deuda, no facturacion de Lucia.",
     },
 )
+CLIENT_NAME_OVERRIDES = (
+    {
+        "client_id": "120314",
+        "canonical_name": "BARBULLA JORGE (P)",
+        "aliases": ("BURBALLA JORGE (VET)", "BURBALLA JORGE (P)"),
+    },
+)
 
 
 class SnapshotDataMissing(RuntimeError):
@@ -207,6 +214,29 @@ def _normalize_match_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().upper())
 
 
+def _normalize_client_id(value: object) -> str:
+    text = str(value or "").strip()
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _apply_client_name_overrides(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "cliente" not in df.columns:
+        return df
+
+    out = df.copy()
+    normalized_names = out["cliente"].map(_normalize_match_text)
+    normalized_ids = (
+        out["id_cliente"].map(_normalize_client_id)
+        if "id_cliente" in out.columns
+        else pd.Series("", index=out.index)
+    )
+    for override in CLIENT_NAME_OVERRIDES:
+        aliases = {_normalize_match_text(value) for value in override["aliases"]}
+        mask = normalized_names.isin(aliases) | normalized_ids.eq(str(override["client_id"]))
+        out.loc[mask, "cliente"] = override["canonical_name"]
+    return out
+
+
 def _apply_sales_zone_overrides(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "zona" not in df.columns:
         return df
@@ -331,14 +361,14 @@ def read_sql(query: str, params: tuple[Any, ...] = ()) -> pd.DataFrame:
                 message="pandas only supports SQLAlchemy connectable",
                 category=UserWarning,
             )
-            return pd.read_sql(query, conn, params=params)
+            return _apply_client_name_overrides(pd.read_sql(query, conn, params=params))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _snapshot_facturas() -> pd.DataFrame:
     df = _read_snapshot_csv("facturas.csv", SAMPLE_FACTURAS_PATH)
     df["fecha"] = pd.to_datetime(df["fecha"])
-    return df
+    return _apply_client_name_overrides(df)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -364,7 +394,7 @@ def _snapshot_clientes() -> pd.DataFrame:
 
     df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
     df["cliente"] = df["cliente"].fillna("")
-    return df
+    return _apply_client_name_overrides(df)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -376,7 +406,7 @@ def _snapshot_creditos() -> pd.DataFrame:
 
     df["zona"] = df["zona"].fillna("").replace("", "Sin zona")
     df["cliente"] = df["cliente"].fillna("")
-    return df
+    return _apply_client_name_overrides(df)
 
 
 def _snapshot_filtered_facturas(
@@ -822,7 +852,7 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
 
     factura_zone = _sales_zone_expr("f")
     zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
-    return read_sql(
+    result = read_sql(
         f"""
         SET NOCOUNT ON;
         SELECT TOP (?)
@@ -842,6 +872,12 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
         """,
         (limite, fecha_desde, fecha_hasta, *zona_params),
     )
+    return (
+        result.groupby("cliente", as_index=False)
+        .agg(total=("total", "sum"), comprobantes=("comprobantes", "sum"))
+        .sort_values("total", ascending=False)
+        .head(limite)
+    )
 
 
 def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
@@ -860,7 +896,7 @@ def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[st
 
     factura_zone = _sales_zone_expr("f")
     zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
-    return read_sql(
+    result = read_sql(
         f"""
         SET NOCOUNT ON;
         SELECT
@@ -879,6 +915,11 @@ def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[st
         ORDER BY total DESC;
         """,
         (fecha_desde, fecha_hasta, *zona_params),
+    )
+    return (
+        result.groupby(["id_cliente", "cliente"], as_index=False)
+        .agg(total=("total", "sum"), comprobantes=("comprobantes", "sum"))
+        .sort_values("total", ascending=False)
     )
 
 
