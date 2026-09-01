@@ -1502,8 +1502,11 @@ def show_fluralaner_metrics(
     detail = fluralaner.convert_display_units(detail)
 
     product_order = list(fluralaner.PRODUCT_ORDER)
+    st.caption(
+        "Feline Full desde 01/07/2026. Bit Trio y Zanex desde 01/08/2026. "
+        "Ectholaner desde 01/09/2026."
+    )
     if seller_view:
-        st.caption("Feline Full desde 01/07/2026. Los demas productos desde 01/08/2026.")
         seller_table = fluralaner.seller_summary(detail, zonas).rename(
             columns={
                 "producto": "Producto",

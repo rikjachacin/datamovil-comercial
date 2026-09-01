@@ -24,7 +24,7 @@ CAMPAIGN_END_DATE = date(2026, 9, 30)
 PRODUCT_START_DATES = {
     "Feline Full": date(2026, 7, 1),
     "Bit Trio": date(2026, 8, 1),
-    "Ectholaner": date(2026, 8, 1),
+    "Ectholaner": date(2026, 9, 1),
     "Zanex": date(2026, 8, 1),
 }
 SALES_ZONE_REASSIGNMENTS = {
