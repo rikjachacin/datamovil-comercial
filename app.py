@@ -27,6 +27,19 @@ from src import weekly_reports
 APP_NAME = "Bruncas Comercial"
 APP_BUILD = "2026-07-13.1105"
 LOGO_PATH = Path("assets/bruncas_logo.png")
+SELLER_ZONE_ORDER = (
+    "BRAVO",
+    "CARINA",
+    "DAVID",
+    "FRANCISCO",
+    "JONATAN MERCAO",
+    "JUAN C. MANZELLI",
+    "LUCIA MORENO",
+    "MACA PROTTO",
+    "MICAELA GONZALEZ",
+    "NOELIA",
+    "ZONA 13 JAVIER MOLARO",
+)
 
 
 st.set_page_config(
@@ -2400,6 +2413,8 @@ with st.sidebar:
         )
 
     zonas_disponibles = zonas_df["zona"].dropna().astype(str).tolist()
+    zonas_disponibles_set = set(zonas_disponibles)
+    zonas_vendedores = [zone for zone in SELLER_ZONE_ORDER if zone in zonas_disponibles_set]
     if current_user.is_admin and not vista_vendedor_activa:
         zona_seleccion = st.multiselect(
             "Zonas",
@@ -2408,10 +2423,12 @@ with st.sidebar:
             key="zonas_selector",
         )
     elif current_user.is_admin and vista_vendedor_activa:
+        if st.session_state.get("vendedor_simulado_selector") not in zonas_vendedores:
+            st.session_state.pop("vendedor_simulado_selector", None)
         vendedor_simulado = st.selectbox(
             "Vendedor",
-            options=zonas_disponibles,
-            index=0 if zonas_disponibles else None,
+            options=zonas_vendedores,
+            index=0 if zonas_vendedores else None,
             placeholder="Elegir vendedor",
             key="vendedor_simulado_selector",
         )
