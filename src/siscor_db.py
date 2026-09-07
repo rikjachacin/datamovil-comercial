@@ -1733,6 +1733,48 @@ def cartera_vencida(
     ).loc[:, columns]
 
 
+def deuda_total(zonas_filtro: tuple[str, ...] = ()) -> float:
+    """Return the current open balance for active clients in the selected zones."""
+    if data_mode() == "snapshot":
+        creditos = _snapshot_creditos().copy()
+        if creditos.empty or "saldo_actual" not in creditos.columns:
+            return 0.0
+        creditos = creditos[~creditos["zona"].isin(EXCLUDED_COMMERCIAL_ZONES)]
+        if zonas_filtro:
+            creditos = creditos[creditos["zona"].isin(zonas_filtro)]
+        return float(pd.to_numeric(creditos["saldo_actual"], errors="coerce").fillna(0).sum())
+
+    signed_balance = _signed_balance("f", "saldo")
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
+    result = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH clientes AS (
+            SELECT DISTINCT c.id_cliente
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+              AND COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') NOT IN ('PROVEEDORES')
+              {zona_sql}
+        )
+        SELECT ISNULL(SUM({signed_balance}), 0) AS deuda_total
+        FROM dbo.cli_factura f
+        INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND f.saldo <> 0
+          {_commercial_zone_filter("f")}
+          {_balance_document_filter("f")};
+        """,
+        zona_params,
+    )
+    if result.empty:
+        return 0.0
+    return float(pd.to_numeric(result["deuda_total"], errors="coerce").fillna(0).iloc[0])
+
+
 def estrategia_cliente(
     cliente: str,
     mes_actual_desde: str,

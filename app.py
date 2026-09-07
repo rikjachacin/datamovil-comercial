@@ -1428,6 +1428,11 @@ def load_overdue_portfolio(zones: tuple[str, ...]) -> pd.DataFrame:
     return portfolio.sort_values(["dias_mora", "importe_vencido"], ascending=[False, False])
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_total_debt(zones: tuple[str, ...]) -> float:
+    return siscor_db.deuda_total(zones)
+
+
 def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
     st.markdown(
         render_module_heading(
@@ -1440,17 +1445,19 @@ def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
     )
     st.caption("Saldos actuales al dia de hoy. La consulta es de solo lectura sobre SisCor.")
 
+    total_open_debt = load_total_debt(zones)
     portfolio = load_overdue_portfolio(zones)
+    overdue_debt = float(portfolio["importe_vencido"].sum()) if not portfolio.empty else 0.0
+    max_days = int(portfolio["dias_mora"].max()) if not portfolio.empty else 0
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Clientes con deuda > 30 dias", number(len(portfolio)))
+    c2.metric("Deuda total", money(total_open_debt))
+    c3.metric("Importe vencido > 30 dias", money(overdue_debt))
+    c4.metric("Mayor mora", f"{max_days} dias")
+
     if portfolio.empty:
         st.success("No hay clientes con deuda vencida mayor a 30 dias para las zonas seleccionadas.")
         return
-
-    total_debt = float(portfolio["importe_vencido"].sum())
-    max_days = int(portfolio["dias_mora"].max())
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Clientes con deuda > 30 dias", number(len(portfolio)))
-    c2.metric("Importe vencido > 30 dias", money(total_debt))
-    c3.metric("Mayor mora", f"{max_days} dias")
 
     table = portfolio.copy()
     table["vencimiento_mas_antiguo"] = pd.to_datetime(
