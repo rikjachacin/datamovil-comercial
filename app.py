@@ -1424,6 +1424,9 @@ def load_overdue_portfolio(zones: tuple[str, ...]) -> pd.DataFrame:
     portfolio["importe_vencido"] = pd.to_numeric(
         portfolio["importe_vencido"], errors="coerce"
     ).fillna(0)
+    portfolio["deuda_total"] = pd.to_numeric(
+        portfolio["deuda_total"], errors="coerce"
+    ).fillna(0)
     portfolio["dias_mora"] = pd.to_numeric(portfolio["dias_mora"], errors="coerce").fillna(0)
     return portfolio.sort_values(["dias_mora", "importe_vencido"], ascending=[False, False])
 
@@ -1472,6 +1475,7 @@ def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
         column_config={
             "cliente": "Cliente",
             "zona": "Zona",
+            "deuda_total": st.column_config.NumberColumn("Deuda total", format="$ %.0f"),
             "importe_vencido": st.column_config.NumberColumn("Deuda > 30 dias", format="$ %.0f"),
             "dias_mora": st.column_config.NumberColumn("Dias de mora", format="%d"),
             "documento_mas_antiguo": "Documento mas antiguo",

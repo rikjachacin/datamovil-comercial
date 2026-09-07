@@ -1613,6 +1613,7 @@ def cartera_vencida(
     columns = [
         "cliente",
         "zona",
+        "deuda_total",
         "importe_vencido",
         "dias_mora",
         "documento_mas_antiguo",
@@ -1643,8 +1644,12 @@ def cartera_vencida(
             if not facturas.empty
             else pd.DataFrame(columns=["cliente", "ultima_compra"])
         )
-        result = creditos.loc[:, ["cliente", "zona", "saldo_vencido", "dias_deuda"]].rename(
-            columns={"saldo_vencido": "importe_vencido", "dias_deuda": "dias_mora"}
+        result = creditos.loc[:, ["cliente", "zona", "saldo_actual", "saldo_vencido", "dias_deuda"]].rename(
+            columns={
+                "saldo_actual": "deuda_total",
+                "saldo_vencido": "importe_vencido",
+                "dias_deuda": "dias_mora",
+            }
         )
         result = result.merge(ultimas, on="cliente", how="left")
         result["documento_mas_antiguo"] = "Sin detalle en snapshot"
@@ -1704,6 +1709,19 @@ def cartera_vencida(
             GROUP BY id_cliente
             HAVING SUM(saldo_firmado) > 0
         ),
+        deuda_total AS (
+            SELECT
+                f.id_cliente,
+                SUM({signed_balance}) AS deuda_total
+            FROM dbo.cli_factura f
+            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.saldo <> 0
+              {_commercial_zone_filter("f")}
+              {_balance_document_filter("f")}
+            GROUP BY f.id_cliente
+        ),
         compras AS (
             SELECT
                 f.id_cliente,
@@ -1719,6 +1737,7 @@ def cartera_vencida(
         SELECT
             c.cliente,
             c.zona,
+            COALESCE(dt.deuda_total, 0) AS deuda_total,
             d.importe_vencido,
             d.dias_mora,
             d.documento_mas_antiguo,
@@ -1726,6 +1745,7 @@ def cartera_vencida(
             p.ultima_compra
         FROM deuda d
         INNER JOIN clientes c ON c.id_cliente = d.id_cliente
+        LEFT JOIN deuda_total dt ON dt.id_cliente = d.id_cliente
         LEFT JOIN compras p ON p.id_cliente = d.id_cliente
         ORDER BY d.dias_mora DESC, d.importe_vencido DESC;
         """,
