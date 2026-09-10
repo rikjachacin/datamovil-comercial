@@ -881,6 +881,11 @@ def numeric_value(value: object) -> float:
     return 0.0 if pd.isna(numeric) else float(numeric)
 
 
+def promotional_prize(objective: object) -> float:
+    base_prize = max(numeric_value(objective) * 0.01, 0.0)
+    return float(math.floor((base_prize / 500) + 0.5) * 500) if base_prize else 0.0
+
+
 TELEMARKETING_ZONE_TOKENS = ("DAVID", "NOELIA", "MICAELA", "MACA", "MACARENA", "LUCIA")
 
 
@@ -1712,11 +1717,7 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
         if "facturado" in display_data.columns:
             objetivo_values = display_data["objetivo"] if "objetivo" in display_data.columns else pd.Series(dtype=float)
             objetivo_numeric = pd.to_numeric(objetivo_values, errors="coerce").fillna(0.0)
-            facturado_numeric = pd.to_numeric(display_data["facturado"], errors="coerce").fillna(0.0)
-            premio_base = facturado_numeric * 0.01
-            display_data["premio_1_pct"] = premio_base.map(
-                lambda amount: float(math.ceil(amount / 5000) * 5000) if amount > 0 else 0.0
-            )
+            display_data["premio_1_pct"] = objetivo_numeric.map(promotional_prize)
             display_data["_premio_ganado"] = pd.to_numeric(
                 display_data.get("cumplimiento", 0), errors="coerce"
             ).fillna(0.0).ge(100)
