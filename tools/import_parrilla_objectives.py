@@ -78,9 +78,11 @@ def main() -> None:
         if not row or not str(row[0]).strip():
             continue
         laboratory = str(row[0]).strip()
+        if laboratory.lower() in ("total", "totales"):
+            continue
         for index, seller in enumerate(headers[1:], start=1):
             seller = str(seller).strip()
-            if not seller:
+            if not seller or seller.lower() in ("total", "totales"):
                 continue
             raw_goal = row[index] if index < len(row) else ""
             records.append(
