@@ -882,9 +882,24 @@ def top_clientes(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ..
 
 def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     if data_mode() == "snapshot":
-        df = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)
+        df = _snapshot_filtered_facturas(fecha_desde, fecha_hasta)
         if df.empty:
             return pd.DataFrame(columns=["id_cliente", "cliente", "total", "comprobantes"])
+        clientes = _snapshot_clientes().copy()
+        clientes["id_cliente_norm"] = clientes["id_cliente"].map(_normalize_client_id)
+        clientes = clientes.drop_duplicates("id_cliente_norm", keep="last")
+        clientes = clientes.rename(columns={"cliente": "cliente_actual", "zona": "zona_actual"})
+        df["id_cliente_norm"] = df["id_cliente"].map(_normalize_client_id)
+        df = df.merge(
+            clientes.loc[:, ["id_cliente_norm", "cliente_actual", "zona_actual"]],
+            on="id_cliente_norm",
+            how="left",
+        )
+        df["zona"] = df["zona_actual"].fillna(df["zona"])
+        df["cliente"] = df["cliente_actual"].fillna(df["cliente"])
+        df = df[~df["zona"].isin(EXCLUDED_COMMERCIAL_ZONES)]
+        if zonas_filtro:
+            df = df[df["zona"].isin(zonas_filtro)]
         df["cliente"] = df["cliente"].fillna("")
         empty_client = df["cliente"] == ""
         df.loc[empty_client, "cliente"] = "Cliente " + df.loc[empty_client, "id_cliente"].astype(str)
@@ -894,24 +909,45 @@ def clientes_vendidos(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[st
             .sort_values("total", ascending=False)
         )
 
-    factura_zone = _sales_zone_expr("f")
-    zona_sql, zona_params = _zona_filter("f", zonas_filtro, factura_zone)
+    zona_sql, zona_params = _zona_filter("c", zonas_filtro, "c.zona")
     result = read_sql(
         f"""
         SET NOCOUNT ON;
+        WITH clientes_rankeados AS (
+            SELECT
+                c.id_cliente,
+                COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente,
+                COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') AS zona,
+                ROW_NUMBER() OVER (
+                    PARTITION BY c.id_cliente
+                    ORDER BY
+                        CASE WHEN NULLIF(z.descripcion, '') IS NULL THEN 1 ELSE 0 END,
+                        cs.id_cliente_sucursal DESC
+                ) AS orden
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+        ), clientes_actuales AS (
+            SELECT id_cliente, cliente, zona
+            FROM clientes_rankeados
+            WHERE orden = 1
+        )
         SELECT
             CAST(f.id_cliente AS varchar(50)) AS id_cliente,
-            COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente)) AS cliente,
+            c.cliente,
             SUM({_signed_total("f", "total")}) AS total,
             COUNT(*) AS comprobantes
         FROM dbo.cli_factura f
+        INNER JOIN clientes_actuales c ON c.id_cliente = f.id_cliente
         WHERE ISNULL(f.Anulado, 0) = 0
           {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
-          {_commercial_zone_filter("f")}
+          {_commercial_zone_filter("c")}
           {_commercial_document_filter("f")}
           {zona_sql}
-        GROUP BY CAST(f.id_cliente AS varchar(50)), COALESCE(NULLIF(f.cliente, ''), CONCAT('Cliente ', f.id_cliente))
+        GROUP BY CAST(f.id_cliente AS varchar(50)), c.cliente
         ORDER BY total DESC;
         """,
         (fecha_desde, fecha_hasta, *zona_params),
@@ -1427,19 +1463,36 @@ def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
             return pd.DataFrame(columns=["cliente"])
         return pd.DataFrame({"cliente": sorted(df["cliente"].dropna().astype(str).unique())})
 
-    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
+    zona_sql, zona_params = _zona_filter("c", zonas_filtro, "c.zona")
     return read_sql(
         f"""
         SET NOCOUNT ON;
-        SELECT DISTINCT
-            COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente
-        FROM dbo.cli_cliente c
-        INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
-        LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
-        WHERE ISNULL(c.activo, 0) = 1
-          AND ISNULL(cs.activo, 0) = 1
+        WITH clientes_rankeados AS (
+            SELECT
+                c.id_cliente,
+                COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente,
+                COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') AS zona,
+                ROW_NUMBER() OVER (
+                    PARTITION BY c.id_cliente
+                    ORDER BY
+                        CASE WHEN NULLIF(z.descripcion, '') IS NULL THEN 1 ELSE 0 END,
+                        cs.id_cliente_sucursal DESC
+                ) AS orden
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+        ), clientes_actuales AS (
+            SELECT id_cliente, cliente, zona
+            FROM clientes_rankeados
+            WHERE orden = 1
+        )
+        SELECT c.cliente
+        FROM clientes_actuales c
+        WHERE c.zona NOT IN ('PROVEEDORES')
           {zona_sql}
-        ORDER BY cliente;
+        ORDER BY c.cliente;
         """,
         zona_params,
     )
