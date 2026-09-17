@@ -68,6 +68,15 @@ SALES_ZONE_OVERRIDES = (
 )
 SALES_TOTAL_NEUTRALIZED_DOCUMENTS = (
     {
+        "date": "2026-09-17",
+        "client_id": "116027",
+        "source_zone": "BRAVO",
+        "id_facturacion": "297699",
+        "invoice_numbers": ("3644",),
+        "document_types": ("NC",),
+        "note": "NC B 9999-3644 por 2565253.44: excluir del calculo comercial a pedido del usuario.",
+    },
+    {
         "date": "2026-07-14",
         "client_id": "117165",
         "source_zone": "LUCIA MORENO",
