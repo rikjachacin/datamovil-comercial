@@ -41,6 +41,15 @@ NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 SALES_ZONE_OVERRIDES = (
     {
         "date": "2026-09-18",
+        "client": "CLAN ULTIMATE S.A. (REG: MP 15450)",
+        "client_id": "114873",
+        "source_zone": "LUCIA MORENO",
+        "target_zone": "MICAELA GONZALEZ",
+        "id_facturacion": "297754",
+        "invoice_numbers": ("102468", "237390"),
+    },
+    {
+        "date": "2026-09-18",
         "client": "GROSMAN IRINA (MN 10815)",
         "client_id": "104437",
         "source_zone": "MOSTRADOR",
