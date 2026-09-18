@@ -40,6 +40,15 @@ BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 SALES_ZONE_OVERRIDES = (
     {
+        "date": "2026-09-18",
+        "client": "GROSMAN IRINA (MN 10815)",
+        "client_id": "104437",
+        "source_zone": "MOSTRADOR",
+        "target_zone": "MACA PROTTO",
+        "id_facturacion": "297765",
+        "invoice_numbers": ("76341", "237401"),
+    },
+    {
         "date": "2026-06-03",
         "client": "MENDI ARTE EL 6 SOCIEDAD ANONIMA",
         "source_zone": "LUCIA MORENO",
