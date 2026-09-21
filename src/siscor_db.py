@@ -2354,6 +2354,61 @@ def stock_resumen() -> pd.DataFrame:
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def catalogo_productos() -> pd.DataFrame:
+    """Catalogo comercial con stock disponible. SisCor se consulta solo en lectura."""
+    if data_mode() == "snapshot":
+        return pd.DataFrame(
+            columns=[
+                "id_producto",
+                "codigo",
+                "producto",
+                "laboratorio",
+                "rubro",
+                "categoria",
+                "droga",
+                "subrubro3",
+                "stock",
+                "fecha_actualizacion",
+            ]
+        )
+
+    return read_sql(
+        """
+        SET NOCOUNT ON;
+        WITH stock AS (
+            SELECT
+                id_producto,
+                SUM(
+                    CAST(ISNULL(cantidad, 0) AS decimal(18, 2))
+                    - CAST(ISNULL(reservado, 0) AS decimal(18, 2))
+                ) AS disponible
+            FROM dbo.pro_stock
+            GROUP BY id_producto
+        )
+        SELECT
+            p.id_producto,
+            LTRIM(RTRIM(COALESCE(p.codigo_ariculo, ''))) AS codigo,
+            LTRIM(RTRIM(COALESCE(p.descripcion, CONCAT('Producto ', p.id_producto)))) AS producto,
+            LTRIM(RTRIM(COALESCE(p.marca, 'Sin laboratorio'))) AS laboratorio,
+            LTRIM(RTRIM(COALESCE(p.rubro, 'Sin rubro'))) AS rubro,
+            LTRIM(RTRIM(COALESCE(p.subrubro1, 'Sin categoria'))) AS categoria,
+            LTRIM(RTRIM(COALESCE(p.subrubro2, ''))) AS droga,
+            LTRIM(RTRIM(COALESCE(p.subrubro3, ''))) AS subrubro3,
+            CASE
+                WHEN ISNULL(s.disponible, 0) > 0 THEN s.disponible
+                ELSE CAST(0 AS decimal(18, 2))
+            END AS stock,
+            p.fecha_modificacion AS fecha_actualizacion
+        FROM dbo.pro_producto_busqueda_detalle p
+        LEFT JOIN stock s ON s.id_producto = p.id_producto
+        WHERE ISNULL(p.activo, 0) = 1
+          AND ISNULL(p.bloqueado, 0) = 0
+        ORDER BY p.descripcion, p.codigo_ariculo;
+        """
+    )
+
+
 def mask_config(config: SisCorConfig) -> dict[str, str]:
     return {
         "servidor": config.server,

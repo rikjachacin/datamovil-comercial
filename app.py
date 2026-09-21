@@ -6,6 +6,7 @@ import html
 import math
 from pathlib import Path
 import traceback
+import unicodedata
 
 import pandas as pd
 import plotly.express as px
@@ -502,6 +503,45 @@ st.markdown(
     [data-testid="stSidebar"] .st-key-dm_nav_fluralaner .stButton button:hover {
         border-left-color: #b42318;
         color: #8f1d14;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_product_search .stButton button {
+        border-left-color: #0f7b6c;
+    }
+
+    [data-testid="stSidebar"] .st-key-dm_nav_product_search .stButton button:hover {
+        border-left-color: #0f7b6c;
+        color: #0b6155;
+    }
+
+    .dm-product-detail {
+        background: #ffffff;
+        border: 1px solid var(--dm-border);
+        border-left: 4px solid var(--dm-accent);
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 8px 22px rgba(20, 36, 58, 0.06);
+        margin-bottom: 12px;
+    }
+
+    .dm-product-code {
+        color: var(--dm-accent);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+    }
+
+    .dm-product-name {
+        color: var(--dm-text);
+        font-size: 20px;
+        font-weight: 800;
+        line-height: 1.25;
+        margin: 4px 0;
+    }
+
+    .dm-product-brand {
+        color: var(--dm-muted);
+        font-size: 13px;
     }
 
     [data-baseweb="input"],
@@ -1127,6 +1167,142 @@ def render_module_heading(title: str, subtitle: str = "", kind: str = "sales", i
         f"{subtitle_html}"
         "</div>"
         "</div>"
+    )
+
+
+def _search_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in text if not unicodedata.combining(char)).casefold().strip()
+
+
+def show_product_search() -> None:
+    st.markdown(
+        render_module_heading(
+            "Buscador de productos y alternativas",
+            "Consulta stock y encontra opciones con la misma droga",
+            "products",
+            "B",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    try:
+        catalog = siscor_db.catalogo_productos()
+    except Exception as exc:
+        st.error("No pude consultar el catalogo de productos de SisCor.")
+        st.code("".join(traceback.format_exception_only(type(exc), exc)).strip())
+        return
+
+    if catalog.empty:
+        st.info("El catalogo de productos no esta disponible en este origen de datos.")
+        return
+
+    catalog = catalog.copy()
+    catalog["stock"] = pd.to_numeric(catalog["stock"], errors="coerce").fillna(0).clip(lower=0)
+    searchable_columns = ["codigo", "producto", "laboratorio", "rubro", "categoria", "droga", "subrubro3"]
+    catalog["_busqueda"] = catalog[searchable_columns].fillna("").agg(" ".join, axis=1).map(_search_text)
+
+    header_left, header_right = st.columns([3, 1])
+    query = header_left.text_input(
+        "Buscar producto",
+        placeholder="Nombre, codigo, laboratorio, categoria o droga",
+        key="product_search_query",
+    )
+    only_stock = header_right.toggle("Solo con stock", value=False, key="product_search_only_stock")
+
+    filtered = catalog
+    normalized_query = _search_text(query)
+    if normalized_query:
+        terms = [term for term in normalized_query.split() if term]
+        mask = pd.Series(True, index=filtered.index)
+        for term in terms:
+            mask &= filtered["_busqueda"].str.contains(term, regex=False, na=False)
+        filtered = filtered[mask]
+    if only_stock:
+        filtered = filtered[filtered["stock"] > 0]
+
+    latest = pd.to_datetime(catalog["fecha_actualizacion"], errors="coerce").max()
+    updated_label = latest.strftime("%d/%m/%Y %H:%M") if pd.notna(latest) else "fecha no disponible"
+    st.caption(
+        f"{len(catalog):,} productos activos · {len(filtered):,} coincidencias · "
+        f"Ultima modificacion del catalogo: {updated_label}"
+    )
+
+    if not normalized_query:
+        st.info("Escribi un nombre, codigo, laboratorio, categoria o droga para comenzar.")
+        return
+    if filtered.empty:
+        st.warning("No encontre productos para esa busqueda con los filtros seleccionados.")
+        return
+
+    visible = filtered.sort_values(["stock", "producto"], ascending=[False, True]).head(60).copy()
+    options = visible["id_producto"].astype(int).tolist()
+    if st.session_state.get("product_search_selected") not in options:
+        st.session_state.pop("product_search_selected", None)
+
+    def product_option(product_id: int) -> str:
+        row = visible.loc[visible["id_producto"].eq(product_id)].iloc[0]
+        stock = float(row["stock"])
+        stock_label = f"{stock:,.0f} disponibles" if stock > 0 else "Sin stock"
+        return f"{row['producto']} · {row['codigo']} · {stock_label}"
+
+    selected_id = st.selectbox(
+        "Resultados",
+        options=options,
+        format_func=product_option,
+        key="product_search_selected",
+        help="Se muestran hasta 60 coincidencias. Agrega mas palabras para precisar la busqueda.",
+    )
+    selected = catalog.loc[catalog["id_producto"].eq(selected_id)].iloc[0]
+
+    st.markdown(
+        "<div class='dm-product-detail'>"
+        f"<div class='dm-product-code'>{html.escape(str(selected['codigo']))}</div>"
+        f"<div class='dm-product-name'>{html.escape(str(selected['producto']))}</div>"
+        f"<div class='dm-product-brand'>{html.escape(str(selected['laboratorio']))}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    stock_col, rubro_col = st.columns(2)
+    stock_col.metric("Stock disponible", f"{float(selected['stock']):,.0f}")
+    rubro_col.metric("Rubro", str(selected["rubro"]))
+    category_col, drug_col = st.columns(2)
+    category_col.metric("Categoria", str(selected["categoria"]))
+    drug_col.metric("Droga", str(selected["droga"]) or "Sin clasificar")
+
+    drug = str(selected["droga"] or "").strip()
+    useful_drug = drug and _search_text(drug) not in {"general", "sin clasificar"}
+    if useful_drug:
+        alternatives = catalog[
+            catalog["droga"].map(_search_text).eq(_search_text(drug))
+            & ~catalog["id_producto"].eq(selected_id)
+        ].copy()
+    else:
+        alternatives = pd.DataFrame()
+
+    st.markdown("#### Alternativas")
+    if alternatives.empty:
+        st.info("No hay alternativas clasificadas con la misma droga para este producto.")
+        return
+
+    alternatives = alternatives.sort_values(["stock", "laboratorio", "producto"], ascending=[False, True, True])
+    alternatives["Disponibilidad"] = alternatives["stock"].map(
+        lambda value: f"{float(value):,.0f} disponibles" if float(value) > 0 else "Sin stock"
+    )
+    alternatives["Coincidencia"] = f"Misma droga: {drug}"
+    st.dataframe(
+        alternatives.rename(
+            columns={
+                "codigo": "Codigo",
+                "producto": "Producto",
+                "laboratorio": "Laboratorio",
+                "categoria": "Categoria",
+            }
+        )[["Codigo", "Producto", "Laboratorio", "Categoria", "Disponibilidad", "Coincidencia"]],
+        hide_index=True,
+        use_container_width=True,
+        height=min(430, 38 + 35 * min(len(alternatives), 11)),
     )
 
 
@@ -2341,6 +2517,9 @@ with st.sidebar:
     with st.container(key="dm_nav_panel"):
         if st.button("Panel comercial", use_container_width=True):
             st.session_state["pantalla_activa"] = "Panel comercial"
+    with st.container(key="dm_nav_product_search"):
+        if st.button("Buscador de productos y alternativas", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Buscador de productos y alternativas"
     with st.container(key="dm_nav_fluralaner"):
         if st.button("Metricas Fluralaner", use_container_width=True):
             st.session_state["pantalla_activa"] = "Metricas Fluralaner"
@@ -2466,6 +2645,10 @@ if pantalla_activa == "Historial Persat":
 
 if pantalla_activa == "Historial Anura":
     show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
+    st.stop()
+
+if pantalla_activa == "Buscador de productos y alternativas":
+    show_product_search()
     st.stop()
 
 if pantalla_activa == "Metricas Fluralaner":
