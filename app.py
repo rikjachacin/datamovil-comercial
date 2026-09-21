@@ -1175,6 +1175,20 @@ def _search_text(value: object) -> str:
     return "".join(char for char in text if not unicodedata.combining(char)).casefold().strip()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _product_search_catalog() -> pd.DataFrame:
+    catalog = siscor_db.catalogo_productos().copy()
+    if catalog.empty:
+        return catalog
+
+    catalog["stock"] = pd.to_numeric(catalog["stock"], errors="coerce").fillna(0).clip(lower=0)
+    searchable_columns = ["codigo", "producto", "laboratorio", "rubro", "categoria", "droga", "subrubro3"]
+    catalog["_busqueda"] = catalog[searchable_columns].fillna("").agg(" ".join, axis=1).map(_search_text)
+    catalog["_droga_busqueda"] = catalog["droga"].map(_search_text)
+    return catalog
+
+
+@st.fragment
 def show_product_search() -> None:
     st.markdown(
         render_module_heading(
@@ -1187,7 +1201,7 @@ def show_product_search() -> None:
     )
 
     try:
-        catalog = siscor_db.catalogo_productos()
+        catalog = _product_search_catalog()
     except Exception as exc:
         st.error("No pude consultar el catalogo de productos de SisCor.")
         st.code("".join(traceback.format_exception_only(type(exc), exc)).strip())
@@ -1196,11 +1210,6 @@ def show_product_search() -> None:
     if catalog.empty:
         st.info("El catalogo de productos no esta disponible en este origen de datos.")
         return
-
-    catalog = catalog.copy()
-    catalog["stock"] = pd.to_numeric(catalog["stock"], errors="coerce").fillna(0).clip(lower=0)
-    searchable_columns = ["codigo", "producto", "laboratorio", "rubro", "categoria", "droga", "subrubro3"]
-    catalog["_busqueda"] = catalog[searchable_columns].fillna("").agg(" ".join, axis=1).map(_search_text)
 
     header_left, header_right = st.columns([3, 1])
     query = header_left.text_input(
@@ -1275,7 +1284,7 @@ def show_product_search() -> None:
     useful_drug = drug and _search_text(drug) not in {"general", "sin clasificar"}
     if useful_drug:
         alternatives = catalog[
-            catalog["droga"].map(_search_text).eq(_search_text(drug))
+            catalog["_droga_busqueda"].eq(_search_text(drug))
             & ~catalog["id_producto"].eq(selected_id)
         ].copy()
     else:
