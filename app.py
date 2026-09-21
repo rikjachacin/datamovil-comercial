@@ -1178,7 +1178,7 @@ def _search_text(value: object) -> str:
 def show_product_search() -> None:
     st.markdown(
         render_module_heading(
-            "Buscador de productos y alternativas",
+            "Productos y Alternativas",
             "Consulta stock y encontra opciones con la misma droga",
             "products",
             "B",
@@ -2518,8 +2518,8 @@ with st.sidebar:
         if st.button("Panel comercial", use_container_width=True):
             st.session_state["pantalla_activa"] = "Panel comercial"
     with st.container(key="dm_nav_product_search"):
-        if st.button("Buscador de productos y alternativas", use_container_width=True):
-            st.session_state["pantalla_activa"] = "Buscador de productos y alternativas"
+        if st.button("Productos y Alternativas", use_container_width=True):
+            st.session_state["pantalla_activa"] = "Productos y Alternativas"
     with st.container(key="dm_nav_fluralaner"):
         if st.button("Metricas Fluralaner", use_container_width=True):
             st.session_state["pantalla_activa"] = "Metricas Fluralaner"
@@ -2647,7 +2647,7 @@ if pantalla_activa == "Historial Anura":
     show_anura_activity(desde_sql, hasta_sql, zonas_filtro, "Historial Anura")
     st.stop()
 
-if pantalla_activa == "Buscador de productos y alternativas":
+if pantalla_activa == "Productos y Alternativas":
     show_product_search()
     st.stop()
 
