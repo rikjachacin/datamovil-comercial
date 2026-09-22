@@ -1844,7 +1844,7 @@ def show_fluralaner_metrics(
             )
 
 
-def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta_mes: date) -> None:
+def show_commissions(current_user: auth.User, fecha_hasta_mes: date) -> None:
     st.markdown(
         render_module_heading(
             "Comisiones y Parrilla P.",
@@ -1862,6 +1862,10 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
     result = commissions.load_latest()
     data = result.data.copy() if result.enabled else pd.DataFrame()
     parrilla_objectives = parrilla.load_objectives()
+    parrilla_objectives = parrilla_objectives[
+        parrilla_objectives["mes"].eq(fecha_hasta_mes.strftime("%Y-%m"))
+    ].copy()
+    parrilla_desde = fecha_hasta_mes.replace(day=1)
     allowed_parrilla_labs = {
         "MUNDI",
         "KONIG",
@@ -1882,12 +1886,13 @@ def show_commissions(current_user: auth.User, fecha_desde_mes: date, fecha_hasta
 
     def render_parrilla_progress(vendor_name: str | None) -> None:
         st.markdown("#### Cumplimiento por laboratorio")
+        st.caption(f"Facturacion acumulada del {parrilla_desde:%d/%m/%Y} al {fecha_hasta_mes:%d/%m/%Y}")
 
         vendor_zones = ()
         if not current_user.is_admin:
             vendor_zones = tuple(zone for zone in current_user.zones if zone != "*")
         sales_by_brand = siscor_db.ventas_por_marca(
-            fecha_desde_mes.isoformat(),
+            parrilla_desde.isoformat(),
             fecha_hasta_mes.isoformat(),
             vendor_zones,
         )
@@ -2676,7 +2681,7 @@ if pantalla_activa == "Historial Clientify":
     st.stop()
 
 if pantalla_activa == "Comisiones":
-    show_commissions(current_user, fecha_desde, fecha_hasta)
+    show_commissions(current_user, fecha_hasta)
     st.stop()
 
 if pantalla_activa == "Informes semanales":
