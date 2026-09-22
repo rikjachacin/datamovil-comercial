@@ -1175,6 +1175,22 @@ def _search_text(value: object) -> str:
     return "".join(char for char in text if not unicodedata.combining(char)).casefold().strip()
 
 
+def _product_family(value: object) -> str:
+    """Return the commercial product name without presentation or dosage."""
+    normalized = _search_text(value)
+    tokens = normalized.replace("(", " ").replace(")", " ").split()
+    presentation_markers = {
+        "bocaditos", "chico", "display", "exhibidor", "gato", "grande",
+        "mas", "mediano", "perro", "x",
+    }
+    family: list[str] = []
+    for token in tokens:
+        if any(char.isdigit() for char in token) or token in presentation_markers:
+            break
+        family.append(token)
+    return " ".join(family) or normalized
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _product_search_catalog() -> pd.DataFrame:
     catalog = siscor_db.catalogo_productos().copy()
@@ -1185,6 +1201,7 @@ def _product_search_catalog() -> pd.DataFrame:
     searchable_columns = ["codigo", "producto", "laboratorio", "rubro", "categoria", "droga", "subrubro3"]
     catalog["_busqueda"] = catalog[searchable_columns].fillna("").agg(" ".join, axis=1).map(_search_text)
     catalog["_droga_busqueda"] = catalog["droga"].map(_search_text)
+    catalog["_familia_producto"] = catalog["producto"].map(_product_family)
     return catalog
 
 
@@ -1285,7 +1302,7 @@ def show_product_search() -> None:
     if useful_drug:
         alternatives = catalog[
             catalog["_droga_busqueda"].eq(_search_text(drug))
-            & ~catalog["id_producto"].eq(selected_id)
+            & ~catalog["_familia_producto"].eq(selected["_familia_producto"])
         ].copy()
     else:
         alternatives = pd.DataFrame()
