@@ -1301,7 +1301,17 @@ def show_product_search() -> None:
 
     drug = str(selected["droga"] or "").strip()
     category = str(selected["categoria"] or "").strip()
-    category_match = str(selected["codigo"] or "").strip().upper() in CATEGORY_MATCH_ALTERNATIVE_CODES
+    selected_code = str(selected["codigo"] or "").strip().upper()
+    default_match_mode = (
+        "Por categoria" if selected_code in CATEGORY_MATCH_ALTERNATIVE_CODES else "Por droga"
+    )
+    match_mode = st.segmented_control(
+        "Relacionar alternativas",
+        options=("Por droga", "Por categoria"),
+        default=default_match_mode,
+        key=f"product_alternative_match_mode_{selected_code}",
+    )
+    category_match = match_mode == "Por categoria"
     useful_drug = drug and _search_text(drug) not in {"general", "sin clasificar"}
     if category_match:
         alternatives = catalog[
