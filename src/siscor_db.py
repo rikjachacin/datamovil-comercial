@@ -31,7 +31,7 @@ SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
 SAMPLE_CREDITOS_PATH = SNAPSHOT_DIR / "sample_creditos.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
-SQL_QUERY_TTL_SECONDS = 30
+SQL_QUERY_TTL_SECONDS = 120
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
 EXCLUDED_PRODUCT_NAMES = ("DESCUENTO PAGO CDO",)
 COMMERCIAL_DOCUMENT_TYPES = ("FC", "NC", "ND")
@@ -471,6 +471,7 @@ def ping() -> pd.DataFrame:
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def month_options() -> pd.DataFrame:
     if data_mode() == "snapshot":
         df = _snapshot_filtered_facturas()
@@ -693,6 +694,7 @@ def _credit_profile_from_raw(raw: pd.DataFrame, meses_venta: int = 12) -> pd.Dat
     return out.loc[:, _credit_columns()]
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def zonas() -> pd.DataFrame:
     if data_mode() == "snapshot":
         df = _snapshot_filtered_facturas()
