@@ -28,6 +28,7 @@ from src import weekly_reports
 APP_NAME = "Bruncas Comercial"
 APP_BUILD = "2026-07-13.1105"
 LOGO_PATH = Path("assets/bruncas_logo.png")
+CATEGORY_MATCH_ALTERNATIVE_CODES = {"CHIN02"}
 SELLER_ZONE_ORDER = (
     "BRAVO",
     "CARINA",
@@ -1201,6 +1202,7 @@ def _product_search_catalog() -> pd.DataFrame:
     searchable_columns = ["codigo", "producto", "laboratorio", "rubro", "categoria", "droga", "subrubro3"]
     catalog["_busqueda"] = catalog[searchable_columns].fillna("").agg(" ".join, axis=1).map(_search_text)
     catalog["_droga_busqueda"] = catalog["droga"].map(_search_text)
+    catalog["_categoria_busqueda"] = catalog["categoria"].map(_search_text)
     catalog["_familia_producto"] = catalog["producto"].map(_product_family)
     return catalog
 
@@ -1298,25 +1300,38 @@ def show_product_search() -> None:
     drug_col.metric("Droga", str(selected["droga"]) or "Sin clasificar")
 
     drug = str(selected["droga"] or "").strip()
+    category = str(selected["categoria"] or "").strip()
+    category_match = str(selected["codigo"] or "").strip().upper() in CATEGORY_MATCH_ALTERNATIVE_CODES
     useful_drug = drug and _search_text(drug) not in {"general", "sin clasificar"}
-    if useful_drug:
+    if category_match:
+        alternatives = catalog[
+            catalog["_categoria_busqueda"].eq(selected["_categoria_busqueda"])
+            & ~catalog["_familia_producto"].eq(selected["_familia_producto"])
+        ].copy()
+        match_label = f"Misma categoria: {category}"
+        empty_message = "No hay otros productos clasificados en esta categoria."
+    elif useful_drug:
         alternatives = catalog[
             catalog["_droga_busqueda"].eq(_search_text(drug))
             & ~catalog["_familia_producto"].eq(selected["_familia_producto"])
         ].copy()
+        match_label = f"Misma droga: {drug}"
+        empty_message = "No hay alternativas clasificadas con la misma droga para este producto."
     else:
         alternatives = pd.DataFrame()
+        match_label = ""
+        empty_message = "No hay alternativas clasificadas para este producto."
 
     st.markdown("#### Alternativas")
     if alternatives.empty:
-        st.info("No hay alternativas clasificadas con la misma droga para este producto.")
+        st.info(empty_message)
         return
 
     alternatives = alternatives.sort_values(["producto", "laboratorio"], ascending=[True, True])
     alternatives["Disponibilidad"] = (
         pd.to_numeric(alternatives["stock"], errors="coerce").fillna(0).round().astype(int)
     )
-    alternatives["Coincidencia"] = f"Misma droga: {drug}"
+    alternatives["Coincidencia"] = match_label
     st.dataframe(
         alternatives.rename(
             columns={
