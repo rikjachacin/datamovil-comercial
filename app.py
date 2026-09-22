@@ -1312,9 +1312,9 @@ def show_product_search() -> None:
         st.info("No hay alternativas clasificadas con la misma droga para este producto.")
         return
 
-    alternatives = alternatives.sort_values(["stock", "laboratorio", "producto"], ascending=[False, True, True])
-    alternatives["Disponibilidad"] = alternatives["stock"].map(
-        lambda value: f"{float(value):,.0f} disponibles" if float(value) > 0 else "Sin stock"
+    alternatives = alternatives.sort_values(["producto", "laboratorio"], ascending=[True, True])
+    alternatives["Disponibilidad"] = (
+        pd.to_numeric(alternatives["stock"], errors="coerce").fillna(0).round().astype(int)
     )
     alternatives["Coincidencia"] = f"Misma droga: {drug}"
     st.dataframe(
@@ -1329,6 +1329,9 @@ def show_product_search() -> None:
         hide_index=True,
         use_container_width=True,
         height=min(430, 38 + 35 * min(len(alternatives), 11)),
+        column_config={
+            "Disponibilidad": st.column_config.NumberColumn("Disponibilidad", format="%d"),
+        },
     )
 
 
