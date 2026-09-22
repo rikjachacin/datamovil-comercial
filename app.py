@@ -2834,32 +2834,6 @@ if vista_vendedor_activa:
             subtitulo_equipo_tarjeta = (
                 f"Facturacion del {rango_equipo_label} frente al objetivo mensual correspondiente"
             )
-    clientes_vendedor = siscor_db.clientes_a_recuperar(
-        desde_sql,
-        hasta_sql,
-        accion_comparacion_desde.isoformat(),
-        accion_comparacion_hasta.isoformat(),
-        zonas_filtro,
-        limite=5,
-    )
-    clientes_vendedor = adapt_actions_dataframe(clientes_vendedor)
-    productos_vendedor = siscor_db.productos_a_impulsar(
-        desde_sql,
-        hasta_sql,
-        accion_comparacion_desde.isoformat(),
-        accion_comparacion_hasta.isoformat(),
-        zonas_filtro,
-        limite=5,
-    )
-    top_clientes_vendedor = siscor_db.clientes_vendidos(
-        desde_sql,
-        hasta_sql,
-        zonas_filtro,
-    )
-    if not top_clientes_vendedor.empty:
-        top_clientes_vendedor = top_clientes_vendedor.loc[:, ["cliente", "total", "comprobantes"]]
-    clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
-
     st.markdown(
         render_team_billing_card(
             cobertura_equipo_tarjeta,
@@ -2981,6 +2955,32 @@ if vista_vendedor_activa:
             unsafe_allow_html=True,
         )
         st.markdown(ranking_html, unsafe_allow_html=True)
+
+    clientes_vendedor = siscor_db.clientes_a_recuperar(
+        desde_sql,
+        hasta_sql,
+        accion_comparacion_desde.isoformat(),
+        accion_comparacion_hasta.isoformat(),
+        zonas_filtro,
+        limite=5,
+    )
+    clientes_vendedor = adapt_actions_dataframe(clientes_vendedor)
+    productos_vendedor = siscor_db.productos_a_impulsar(
+        desde_sql,
+        hasta_sql,
+        accion_comparacion_desde.isoformat(),
+        accion_comparacion_hasta.isoformat(),
+        zonas_filtro,
+        limite=5,
+    )
+    top_clientes_vendedor = siscor_db.clientes_vendidos(
+        desde_sql,
+        hasta_sql,
+        zonas_filtro,
+    )
+    if not top_clientes_vendedor.empty:
+        top_clientes_vendedor = top_clientes_vendedor.loc[:, ["cliente", "total", "comprobantes"]]
+    clientes_catalogo_vendedor = siscor_db.clientes_busqueda(zonas_filtro)
 
     st.markdown(
         render_module_heading(

@@ -1222,6 +1222,7 @@ def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def clientes_a_recuperar(
     mes_actual_desde: str,
     fecha_hasta: str,
@@ -1251,57 +1252,49 @@ def clientes_a_recuperar(
               AND ISNULL(cs.activo, 0) = 1
               {zona_sql}
         ),
-        actual AS (
+        ventas AS (
             SELECT
                 f.id_cliente,
                 c.cliente,
                 c.zona,
-                SUM({_signed_total("f", "total")}) AS venta_mes
+                SUM(CASE WHEN f.fecha >= ? AND f.fecha < DATEADD(day, 1, CAST(? AS date))
+                    THEN {_signed_total("f", "total")} ELSE 0 END) AS venta_mes,
+                SUM(CASE WHEN f.fecha >= ? AND f.fecha < DATEADD(day, 1, CAST(? AS date))
+                    THEN {_signed_total("f", "total")} ELSE 0 END) AS venta_mes_anterior
             FROM dbo.cli_factura f
             INNER JOIN cartera c ON c.id_cliente = f.id_cliente
             WHERE ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
-              AND CAST(f.fecha AS date) BETWEEN ? AND ?
-              {_commercial_zone_filter("f")}
-              {_commercial_document_filter("f")}
-            GROUP BY f.id_cliente, c.cliente, c.zona
-        ),
-        anterior AS (
-            SELECT
-                f.id_cliente,
-                c.cliente,
-                c.zona,
-                SUM({_signed_total("f", "total")}) AS venta_mes_anterior
-            FROM dbo.cli_factura f
-            INNER JOIN cartera c ON c.id_cliente = f.id_cliente
-            WHERE ISNULL(f.Anulado, 0) = 0
-              {_authorized_invoice_filter("f")}
-              AND CAST(f.fecha AS date) BETWEEN ? AND ?
+              AND (
+                  (f.fecha >= ? AND f.fecha < DATEADD(day, 1, CAST(? AS date)))
+                  OR (f.fecha >= ? AND f.fecha < DATEADD(day, 1, CAST(? AS date)))
+              )
               {_commercial_zone_filter("f")}
               {_commercial_document_filter("f")}
             GROUP BY f.id_cliente, c.cliente, c.zona
         )
         SELECT TOP (?)
-            COALESCE(a.cliente, p.cliente) AS cliente,
-            COALESCE(a.zona, p.zona) AS zona,
-            ISNULL(a.venta_mes, 0) AS venta_mes,
-            ISNULL(p.venta_mes_anterior, 0) AS venta_mes_anterior,
-            ISNULL(a.venta_mes, 0) - ISNULL(p.venta_mes_anterior, 0) AS variacion,
+            v.cliente,
+            v.zona,
+            v.venta_mes,
+            v.venta_mes_anterior,
+            v.venta_mes - v.venta_mes_anterior AS variacion,
             CASE
-                WHEN ISNULL(a.venta_mes, 0) = 0 AND ISNULL(p.venta_mes_anterior, 0) > 0 THEN 'Recuperar visita'
-                WHEN ISNULL(a.venta_mes, 0) < ISNULL(p.venta_mes_anterior, 0) * 0.6 THEN 'Reactivar compra'
+                WHEN v.venta_mes = 0 THEN 'Recuperar visita'
+                WHEN v.venta_mes < v.venta_mes_anterior * 0.6 THEN 'Reactivar compra'
                 ELSE 'Dar seguimiento'
             END AS accion
-        FROM actual a
-        FULL OUTER JOIN anterior p
-            ON p.id_cliente = a.id_cliente
-           AND p.zona = a.zona
-        WHERE ISNULL(p.venta_mes_anterior, 0) > 0
-          AND ISNULL(a.venta_mes, 0) < ISNULL(p.venta_mes_anterior, 0) * 0.8
+        FROM ventas v
+        WHERE v.venta_mes_anterior > 0
+          AND v.venta_mes < v.venta_mes_anterior * 0.8
         ORDER BY variacion ASC;
         """,
         (
             *zona_params,
+            mes_actual_desde,
+            fecha_hasta,
+            mes_anterior_desde,
+            mes_anterior_hasta,
             mes_actual_desde,
             fecha_hasta,
             mes_anterior_desde,
@@ -1760,78 +1753,67 @@ def cartera_vencida(
               {zona_sql}
             GROUP BY c.id_cliente
         ),
-        deuda_documentos AS (
+        documentos AS (
             SELECT
                 f.id_cliente,
                 {signed_balance} AS saldo_firmado,
                 CAST(COALESCE(f.fecha_vencimiento, f.fecha) AS date) AS fecha_vencimiento,
-                DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE()) AS dias_mora,
-                CONCAT(f.tipo, ' ', CAST(f.numero AS varchar(50))) AS documento,
-                ROW_NUMBER() OVER (
-                    PARTITION BY f.id_cliente
-                    ORDER BY COALESCE(f.fecha_vencimiento, f.fecha), f.id_facturacion
-                ) AS orden_antiguedad
+                DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE()) AS dias_mora
             FROM dbo.cli_factura f
             INNER JOIN clientes c ON c.id_cliente = f.id_cliente
             WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.saldo <> 0
+              {_commercial_zone_filter("f")}
+              {_balance_document_filter("f")}
+        ),
+        deuda_agrupada AS (
+            SELECT
+                id_cliente,
+                SUM(saldo_firmado) AS deuda_total,
+                SUM(CASE WHEN dias_mora > ? THEN saldo_firmado ELSE 0 END) AS importe_vencido,
+                MAX(CASE WHEN dias_mora > ? THEN dias_mora END) AS dias_mora,
+                MIN(CASE WHEN dias_mora > ? THEN fecha_vencimiento END) AS vencimiento_mas_antiguo
+            FROM documentos
+            GROUP BY id_cliente
+        )
+        SELECT
+            c.cliente,
+            c.zona,
+            d.deuda_total,
+            d.importe_vencido,
+            d.dias_mora,
+            oldest.documento AS documento_mas_antiguo,
+            d.vencimiento_mas_antiguo,
+            p.ultima_compra
+        FROM deuda_agrupada d
+        INNER JOIN clientes c ON c.id_cliente = d.id_cliente
+        OUTER APPLY (
+            SELECT TOP (1) CONCAT(f.tipo, ' ', CAST(f.numero AS varchar(50))) AS documento
+            FROM dbo.cli_factura f
+            WHERE f.id_cliente = d.id_cliente
+              AND ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
               AND f.saldo <> 0
               AND DATEDIFF(day, COALESCE(f.fecha_vencimiento, f.fecha), GETDATE()) > ?
               {_commercial_zone_filter("f")}
               {_balance_document_filter("f")}
-        ),
-        deuda AS (
-            SELECT
-                id_cliente,
-                SUM(saldo_firmado) AS importe_vencido,
-                MAX(dias_mora) AS dias_mora,
-                MAX(CASE WHEN orden_antiguedad = 1 THEN documento END) AS documento_mas_antiguo,
-                MIN(fecha_vencimiento) AS vencimiento_mas_antiguo
-            FROM deuda_documentos
-            GROUP BY id_cliente
-            HAVING SUM(saldo_firmado) > 0
-        ),
-        deuda_total AS (
-            SELECT
-                f.id_cliente,
-                SUM({signed_balance}) AS deuda_total
+            ORDER BY COALESCE(f.fecha_vencimiento, f.fecha), f.id_facturacion
+        ) oldest
+        OUTER APPLY (
+            SELECT TOP (1) CAST(f.fecha AS date) AS ultima_compra
             FROM dbo.cli_factura f
-            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
-            WHERE ISNULL(f.Anulado, 0) = 0
-              {_authorized_invoice_filter("f")}
-              AND f.saldo <> 0
-              {_commercial_zone_filter("f")}
-              {_balance_document_filter("f")}
-            GROUP BY f.id_cliente
-        ),
-        compras AS (
-            SELECT
-                f.id_cliente,
-                MAX(CAST(f.fecha AS date)) AS ultima_compra
-            FROM dbo.cli_factura f
-            INNER JOIN clientes c ON c.id_cliente = f.id_cliente
-            WHERE ISNULL(f.Anulado, 0) = 0
+            WHERE f.id_cliente = d.id_cliente
+              AND ISNULL(f.Anulado, 0) = 0
               {_authorized_invoice_filter("f")}
               {_commercial_zone_filter("f")}
               {_credit_document_filter("f")}
-            GROUP BY f.id_cliente
-        )
-        SELECT
-            c.cliente,
-            c.zona,
-            COALESCE(dt.deuda_total, 0) AS deuda_total,
-            d.importe_vencido,
-            d.dias_mora,
-            d.documento_mas_antiguo,
-            d.vencimiento_mas_antiguo,
-            p.ultima_compra
-        FROM deuda d
-        INNER JOIN clientes c ON c.id_cliente = d.id_cliente
-        LEFT JOIN deuda_total dt ON dt.id_cliente = d.id_cliente
-        LEFT JOIN compras p ON p.id_cliente = d.id_cliente
+            ORDER BY f.fecha DESC
+        ) p
+        WHERE d.importe_vencido > 0
         ORDER BY d.dias_mora DESC, d.importe_vencido DESC;
         """,
-        (*zona_params, dias_minimos),
+        (*zona_params, dias_minimos, dias_minimos, dias_minimos, dias_minimos),
     ).loc[:, columns]
 
 
