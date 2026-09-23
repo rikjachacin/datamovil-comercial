@@ -3254,11 +3254,19 @@ if vista_vendedor_activa:
 
     st.stop()
 
-m1, m2, m3, m4 = st.columns(4)
+unidades_df = siscor_db.unidades_por_zona(desde_sql, hasta_sql, zonas_filtro)
+unidades_vendidas = (
+    pd.to_numeric(unidades_df["unidades"], errors="coerce").fillna(0).sum()
+    if not unidades_df.empty
+    else 0
+)
+
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Ventas", money(kpi_df["total"]))
 m2.metric("Comprobantes", number(kpi_df["comprobantes"]))
 m3.metric("Clientes", number(kpi_df["clientes"]))
 m4.metric("Ticket promedio", money(kpi_df["ticket_promedio"]))
+m5.metric("Unidades vendidas", number(unidades_vendidas))
 
 try:
     overdue_summary = load_overdue_portfolio(zonas_filtro)
