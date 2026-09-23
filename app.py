@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 import html
-from io import BytesIO
 import math
 from pathlib import Path
 import traceback
@@ -1667,74 +1666,6 @@ def load_overdue_portfolio(zones: tuple[str, ...]) -> pd.DataFrame:
     return portfolio.sort_values(["dias_mora", "importe_vencido"], ascending=[False, False])
 
 
-def overdue_portfolio_excel(table: pd.DataFrame) -> bytes:
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-
-    export = table.rename(
-        columns={
-            "cliente": "Cliente",
-            "zona": "Zona",
-            "deuda_total": "Deuda total",
-            "importe_vencido": "Deuda mayor a 30 dias",
-            "dias_mora": "Dias de mora",
-            "documento_mas_antiguo": "Documento mas antiguo",
-            "vencimiento_mas_antiguo": "Vencimiento mas antiguo",
-            "ultima_compra": "Ultima compra",
-        }
-    ).copy()
-    export = export.loc[
-        :,
-        [
-            "Cliente",
-            "Zona",
-            "Deuda total",
-            "Deuda mayor a 30 dias",
-            "Dias de mora",
-            "Documento mas antiguo",
-            "Vencimiento mas antiguo",
-            "Ultima compra",
-        ],
-    ]
-    for column in ("Deuda total", "Deuda mayor a 30 dias", "Dias de mora"):
-        export[column] = pd.to_numeric(export[column], errors="coerce").fillna(0)
-    for column in ("Vencimiento mas antiguo", "Ultima compra"):
-        export[column] = pd.to_datetime(export[column], errors="coerce")
-
-    buffer = BytesIO()
-    with pd.ExcelWriter(
-        buffer,
-        engine="openpyxl",
-        date_format="DD/MM/YYYY",
-        datetime_format="DD/MM/YYYY",
-    ) as writer:
-        export.to_excel(writer, sheet_name="Cartera vencida", index=False)
-        worksheet = writer.sheets["Cartera vencida"]
-        worksheet.freeze_panes = "A2"
-        worksheet.auto_filter.ref = worksheet.dimensions
-        worksheet.sheet_view.showGridLines = False
-
-        header_fill = PatternFill("solid", fgColor="176B5B")
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = Font(color="FFFFFF", bold=True)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        worksheet.row_dimensions[1].height = 24
-
-        for row in range(2, worksheet.max_row + 1):
-            worksheet.cell(row, 3).number_format = '$ #,##0.00'
-            worksheet.cell(row, 4).number_format = '$ #,##0.00'
-            worksheet.cell(row, 5).number_format = '0'
-            worksheet.cell(row, 7).number_format = 'DD/MM/YYYY'
-            worksheet.cell(row, 8).number_format = 'DD/MM/YYYY'
-
-        widths = (38, 24, 18, 23, 14, 24, 24, 16)
-        for index, width in enumerate(widths, 1):
-            worksheet.column_dimensions[get_column_letter(index)].width = width
-
-    return buffer.getvalue()
-
-
 def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
     st.markdown(
         render_module_heading(
@@ -1764,15 +1695,6 @@ def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
         table["vencimiento_mas_antiguo"], errors="coerce"
     )
     table["ultima_compra"] = pd.to_datetime(table["ultima_compra"], errors="coerce")
-    st.download_button(
-        "Descargar Excel",
-        data=overdue_portfolio_excel(table),
-        file_name=f"Cartera_Vencida_{date.today():%Y-%m-%d}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True,
-    )
-    st.caption("El archivo Excel conserva los montos como numeros y evita problemas de punto y coma del CSV.")
     st.dataframe(
         table,
         use_container_width=True,
