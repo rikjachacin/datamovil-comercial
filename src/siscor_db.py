@@ -1589,19 +1589,30 @@ def venta_cruzada_cliente(
     purchases = read_sql(
         f"""
         SET NOCOUNT ON;
-        SELECT DISTINCT
-            p.id_subrubro1 AS subrubro_id
-        FROM dbo.cli_factura_item fi
-        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
-        LEFT JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
-        WHERE ISNULL(f.Anulado, 0) = 0
-          {_authorized_invoice_filter("f")}
-          AND f.id_cliente IN ({placeholders})
-          AND CAST(f.fecha AS date) BETWEEN DATEADD(month, -18, CAST(? AS date)) AND CAST(? AS date)
-          {_commercial_zone_filter("f")}
-          {_commercial_document_filter("f")}
-          AND p.id_subrubro1 IS NOT NULL
-          AND f.tipo IN ('FC', 'ND');
+        WITH productos AS (
+            SELECT
+                fi.id_producto,
+                p.id_subrubro1 AS subrubro_id,
+                SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS facturacion
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            LEFT JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND f.id_cliente IN ({placeholders})
+              AND CAST(f.fecha AS date) BETWEEN DATEADD(year, -2, CAST(? AS date)) AND CAST(? AS date)
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+              AND p.id_subrubro1 IS NOT NULL
+            GROUP BY fi.id_producto, p.id_subrubro1
+            HAVING SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) > 0
+        ), habituales AS (
+            SELECT TOP (8) subrubro_id
+            FROM productos
+            ORDER BY facturacion DESC
+        )
+        SELECT DISTINCT subrubro_id
+        FROM habituales;
         """,
         (*ids, fecha_hasta, fecha_hasta),
     )
