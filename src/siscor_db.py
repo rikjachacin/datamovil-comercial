@@ -1533,6 +1533,7 @@ def _cross_selling_rules() -> pd.DataFrame:
         "coincidencia",
         "sugerencia",
         "validacion",
+        "filtro_producto",
     ]
     if not CROSS_SELLING_RULES_PATH.exists() or Fernet is None:
         return pd.DataFrame(columns=columns)
@@ -1557,17 +1558,7 @@ def venta_cruzada_cliente(
     zonas_filtro: tuple[str, ...] = (),
     limite: int = 15,
 ) -> pd.DataFrame:
-    columns = [
-        "prioridad",
-        "compro",
-        "ultima_compra",
-        "comprobantes",
-        "facturacion_18m",
-        "oportunidad",
-        "sugerencia",
-        "validar",
-        "productos_disponibles",
-    ]
+    columns = ["compra", "ofrecer", "productos_disponibles"]
     if data_mode() == "snapshot":
         return pd.DataFrame(columns=columns)
 
@@ -1598,13 +1589,8 @@ def venta_cruzada_cliente(
     purchases = read_sql(
         f"""
         SET NOCOUNT ON;
-        SELECT
-            p.id_subrubro1 AS subrubro_id,
-            MAX(LTRIM(RTRIM(COALESCE(p.subrubro1, 'Sin categoria')))) AS subrubro,
-            SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS unidades,
-            SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS facturacion,
-            COUNT(DISTINCT CASE WHEN f.tipo IN ('FC', 'ND') THEN f.id_facturacion END) AS comprobantes,
-            MAX(CASE WHEN f.tipo IN ('FC', 'ND') THEN CAST(f.fecha AS date) END) AS ultima_compra
+        SELECT DISTINCT
+            p.id_subrubro1 AS subrubro_id
         FROM dbo.cli_factura_item fi
         INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
         LEFT JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
@@ -1615,8 +1601,7 @@ def venta_cruzada_cliente(
           {_commercial_zone_filter("f")}
           {_commercial_document_filter("f")}
           AND p.id_subrubro1 IS NOT NULL
-        GROUP BY p.id_subrubro1
-        HAVING SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) > 0;
+          AND f.tipo IN ('FC', 'ND');
         """,
         (*ids, fecha_hasta, fecha_hasta),
     )
@@ -1671,42 +1656,49 @@ def venta_cruzada_cliente(
         (fecha_hasta, fecha_hasta, *destination_ids),
     )
 
-    product_map: dict[int, str] = {}
     if not products.empty:
         products["destino_id"] = pd.to_numeric(products["destino_id"], errors="coerce").fillna(0).astype(int)
         products = products.drop_duplicates(["destino_id", "id_producto"])
-        for destination_id, group in products.groupby("destino_id", sort=False):
-            top = group.head(3)
-            product_map[int(destination_id)] = "; ".join(
-                f"{row.producto} ({float(row.stock):.0f} u)" for row in top.itertuples()
-            )
-
-    purchase_map = purchases.assign(
-        subrubro_id=pd.to_numeric(purchases["subrubro_id"], errors="coerce").fillna(0).astype(int)
-    ).set_index("subrubro_id").to_dict("index")
-    priority_order = {"Piloto prioritario": 0, "Piloto supervisado": 1, "Piloto segmentado": 2}
+    priority_order = {
+        "Piloto prioritario": 0,
+        "Piloto logico": 1,
+        "Piloto lógico": 1,
+        "Piloto supervisado": 2,
+        "Piloto segmentado": 3,
+        "Revision por SKU": 4,
+        "Revisión por SKU": 4,
+    }
     rows: list[dict[str, object]] = []
     for rule in applicable.itertuples():
-        purchase = purchase_map.get(int(rule.origen_id), {})
+        candidates = products[products["destino_id"] == int(rule.destino_id)].copy()
+        product_filter = str(rule.filtro_producto or "").strip()
+        if product_filter.startswith("-"):
+            candidates = candidates[
+                ~candidates["producto"].astype(str).str.contains(product_filter[1:], case=False, na=False)
+            ]
+        elif product_filter:
+            candidates = candidates[
+                candidates["producto"].astype(str).str.contains(product_filter, case=False, na=False, regex=True)
+            ]
+        top = candidates.head(3)
+        available = "; ".join(
+            f"{row.producto} ({float(row.stock):.0f} u)" for row in top.itertuples()
+        )
+        if not available:
+            continue
         rows.append(
             {
-                "prioridad": str(rule.decision).replace("Piloto ", "").capitalize(),
                 "_priority": priority_order.get(str(rule.decision), 9),
                 "_coincidence": float(rule.coincidencia),
-                "compro": str(rule.origen),
-                "ultima_compra": purchase.get("ultima_compra"),
-                "comprobantes": int(purchase.get("comprobantes", 0) or 0),
-                "facturacion_18m": float(purchase.get("facturacion", 0) or 0),
-                "oportunidad": str(rule.destino),
-                "sugerencia": str(rule.sugerencia),
-                "validar": str(rule.validacion),
-                "productos_disponibles": product_map.get(int(rule.destino_id), "Sin stock disponible"),
+                "compra": str(rule.origen),
+                "ofrecer": str(rule.destino),
+                "productos_disponibles": available,
             }
         )
 
-    result = pd.DataFrame(rows).sort_values(
-        ["_priority", "facturacion_18m", "_coincidence"], ascending=[True, False, False]
-    )
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    result = pd.DataFrame(rows).sort_values(["_priority", "_coincidence"], ascending=[True, False])
     return result.head(max(int(limite), 1)).loc[:, columns]
 
 

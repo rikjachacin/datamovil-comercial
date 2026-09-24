@@ -3255,7 +3255,7 @@ if vista_vendedor_activa:
         st.markdown(
             render_module_heading(
                 "Oportunidades de venta cruzada",
-                "Familias que el cliente todavia no compra y productos disponibles para ofrecer",
+                "Si compra una familia, ofrece su complemento",
                 "action",
                 "+",
             ),
@@ -3282,19 +3282,10 @@ if vista_vendedor_activa:
                 hide_index=True,
                 height=min(150 + 42 * len(venta_cruzada), 440),
                 column_config={
-                    "prioridad": "Prioridad",
-                    "compro": "Ya compra",
-                    "ultima_compra": st.column_config.DateColumn("Ultima compra", format="DD/MM/YYYY"),
-                    "comprobantes": st.column_config.NumberColumn("Compras 18m", format="%d"),
-                    "facturacion_18m": st.column_config.NumberColumn("Facturacion 18m", format="$ %.0f"),
-                    "oportunidad": "Oportunidad",
-                    "sugerencia": "Pregunta sugerida",
-                    "validar": "Validar antes de ofrecer",
-                    "productos_disponibles": "Productos con stock",
+                    "compra": "El cliente compra",
+                    "ofrecer": "Ofrecer",
+                    "productos_disponibles": "Productos disponibles",
                 },
-            )
-            st.caption(
-                "La sugerencia abre una conversacion comercial; no reemplaza la validacion del vendedor ni una indicacion profesional."
             )
 
     st.stop()
