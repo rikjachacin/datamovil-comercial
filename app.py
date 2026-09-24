@@ -3252,6 +3252,51 @@ if vista_vendedor_activa:
                 },
             )
 
+        st.markdown(
+            render_module_heading(
+                "Oportunidades de venta cruzada",
+                "Familias que el cliente todavia no compra y productos disponibles para ofrecer",
+                "action",
+                "+",
+            ),
+            unsafe_allow_html=True,
+        )
+        try:
+            venta_cruzada = siscor_db.venta_cruzada_cliente(
+                cliente_seleccionado,
+                historial_cliente_hasta.isoformat(),
+                zonas_filtro,
+            )
+        except Exception:
+            venta_cruzada = pd.DataFrame()
+            st.warning("No pude calcular las oportunidades de venta cruzada en este momento.")
+
+        if venta_cruzada.empty:
+            st.info(
+                "Este cliente no tiene oportunidades habilitadas por las reglas actuales o ya compra las familias complementarias."
+            )
+        else:
+            st.dataframe(
+                venta_cruzada,
+                use_container_width=True,
+                hide_index=True,
+                height=min(150 + 42 * len(venta_cruzada), 440),
+                column_config={
+                    "prioridad": "Prioridad",
+                    "compro": "Ya compra",
+                    "ultima_compra": st.column_config.DateColumn("Ultima compra", format="DD/MM/YYYY"),
+                    "comprobantes": st.column_config.NumberColumn("Compras 18m", format="%d"),
+                    "facturacion_18m": st.column_config.NumberColumn("Facturacion 18m", format="$ %.0f"),
+                    "oportunidad": "Oportunidad",
+                    "sugerencia": "Pregunta sugerida",
+                    "validar": "Validar antes de ofrecer",
+                    "productos_disponibles": "Productos con stock",
+                },
+            )
+            st.caption(
+                "La sugerencia abre una conversacion comercial; no reemplaza la validacion del vendedor ni una indicacion profesional."
+            )
+
     st.stop()
 
 unidades_df = siscor_db.unidades_por_zona(desde_sql, hasta_sql, zonas_filtro)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any
 import math
@@ -30,6 +30,7 @@ SAMPLE_PEDIDO_ITEMS_PATH = SNAPSHOT_DIR / "sample_pedido_items.csv"
 SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
 SAMPLE_CREDITOS_PATH = SNAPSHOT_DIR / "sample_creditos.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
+CROSS_SELLING_RULES_PATH = SNAPSHOT_DIR / "cross_selling_rules.csv.enc"
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 SQL_QUERY_TTL_SECONDS = 120
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
@@ -1518,6 +1519,195 @@ def clientes_busqueda(zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
         """,
         zona_params,
     )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cross_selling_rules() -> pd.DataFrame:
+    columns = [
+        "origen_id",
+        "origen",
+        "destino_id",
+        "destino",
+        "decision",
+        "segmento",
+        "coincidencia",
+        "sugerencia",
+        "validacion",
+    ]
+    if not CROSS_SELLING_RULES_PATH.exists() or Fernet is None:
+        return pd.DataFrame(columns=columns)
+    key = _snapshot_key()
+    if not key:
+        return pd.DataFrame(columns=columns)
+    try:
+        payload = Fernet(key.encode("utf-8")).decrypt(CROSS_SELLING_RULES_PATH.read_bytes())
+    except (InvalidToken, ValueError) as exc:
+        raise RuntimeError("No se pudieron abrir las reglas de venta cruzada.") from exc
+    rules = pd.read_csv(StringIO(payload.decode("utf-8")))
+    for column in ("origen_id", "destino_id"):
+        rules[column] = pd.to_numeric(rules[column], errors="coerce").fillna(0).astype(int)
+    rules["coincidencia"] = pd.to_numeric(rules["coincidencia"], errors="coerce").fillna(0)
+    return rules.loc[:, columns]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def venta_cruzada_cliente(
+    cliente: str,
+    fecha_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+    limite: int = 15,
+) -> pd.DataFrame:
+    columns = [
+        "prioridad",
+        "compro",
+        "ultima_compra",
+        "comprobantes",
+        "facturacion_18m",
+        "oportunidad",
+        "sugerencia",
+        "validar",
+        "productos_disponibles",
+    ]
+    if data_mode() == "snapshot":
+        return pd.DataFrame(columns=columns)
+
+    rules = _cross_selling_rules()
+    if rules.empty:
+        return pd.DataFrame(columns=columns)
+
+    zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
+    client_ids = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT DISTINCT c.id_cliente
+        FROM dbo.cli_cliente c
+        INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+        LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+        WHERE ISNULL(c.activo, 0) = 1
+          AND ISNULL(cs.activo, 0) = 1
+          AND COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) = ?
+          {zona_sql};
+        """,
+        (cliente, *zona_params),
+    )
+    if client_ids.empty:
+        return pd.DataFrame(columns=columns)
+
+    ids = tuple(int(value) for value in client_ids["id_cliente"].dropna().unique())
+    placeholders = ", ".join("?" for _ in ids)
+    purchases = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        SELECT
+            p.id_subrubro1 AS subrubro_id,
+            MAX(LTRIM(RTRIM(COALESCE(p.subrubro1, 'Sin categoria')))) AS subrubro,
+            SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS unidades,
+            SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS facturacion,
+            COUNT(DISTINCT CASE WHEN f.tipo IN ('FC', 'ND') THEN f.id_facturacion END) AS comprobantes,
+            MAX(CASE WHEN f.tipo IN ('FC', 'ND') THEN CAST(f.fecha AS date) END) AS ultima_compra
+        FROM dbo.cli_factura_item fi
+        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+        LEFT JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND f.id_cliente IN ({placeholders})
+          AND CAST(f.fecha AS date) BETWEEN DATEADD(month, -18, CAST(? AS date)) AND CAST(? AS date)
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          AND p.id_subrubro1 IS NOT NULL
+        GROUP BY p.id_subrubro1
+        HAVING SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) > 0;
+        """,
+        (*ids, fecha_hasta, fecha_hasta),
+    )
+    if purchases.empty:
+        return pd.DataFrame(columns=columns)
+
+    purchased_ids = set(pd.to_numeric(purchases["subrubro_id"], errors="coerce").dropna().astype(int))
+    applicable = rules[
+        rules["origen_id"].isin(purchased_ids) & ~rules["destino_id"].isin(purchased_ids)
+    ].copy()
+    if applicable.empty:
+        return pd.DataFrame(columns=columns)
+
+    destination_ids = tuple(int(value) for value in applicable["destino_id"].unique())
+    destination_placeholders = ", ".join("?" for _ in destination_ids)
+    products = read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH stock AS (
+            SELECT id_producto,
+                   SUM(CAST(ISNULL(cantidad, 0) AS decimal(18, 2)) - CAST(ISNULL(reservado, 0) AS decimal(18, 2))) AS disponible
+            FROM dbo.pro_stock
+            GROUP BY id_producto
+        ), ventas AS (
+            SELECT fi.id_producto,
+                   SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS unidades_6m
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND CAST(f.fecha AS date) BETWEEN DATEADD(month, -6, CAST(? AS date)) AND CAST(? AS date)
+              {_commercial_zone_filter("f")}
+              {_commercial_document_filter("f")}
+            GROUP BY fi.id_producto
+        )
+        SELECT
+            p.id_subrubro1 AS destino_id,
+            p.id_producto,
+            LTRIM(RTRIM(COALESCE(p.codigo_ariculo, ''))) AS codigo,
+            LTRIM(RTRIM(COALESCE(p.descripcion, CONCAT('Producto ', p.id_producto)))) AS producto,
+            CAST(ISNULL(s.disponible, 0) AS decimal(18, 2)) AS stock,
+            CAST(ISNULL(v.unidades_6m, 0) AS decimal(18, 2)) AS unidades_6m
+        FROM dbo.pro_producto_busqueda_detalle p
+        LEFT JOIN stock s ON s.id_producto = p.id_producto
+        LEFT JOIN ventas v ON v.id_producto = p.id_producto
+        WHERE ISNULL(p.activo, 0) = 1
+          AND ISNULL(p.bloqueado, 0) = 0
+          AND ISNULL(s.disponible, 0) > 0
+          AND p.id_subrubro1 IN ({destination_placeholders})
+        ORDER BY p.id_subrubro1, unidades_6m DESC, stock DESC, p.descripcion;
+        """,
+        (fecha_hasta, fecha_hasta, *destination_ids),
+    )
+
+    product_map: dict[int, str] = {}
+    if not products.empty:
+        products["destino_id"] = pd.to_numeric(products["destino_id"], errors="coerce").fillna(0).astype(int)
+        products = products.drop_duplicates(["destino_id", "id_producto"])
+        for destination_id, group in products.groupby("destino_id", sort=False):
+            top = group.head(3)
+            product_map[int(destination_id)] = "; ".join(
+                f"{row.producto} ({float(row.stock):.0f} u)" for row in top.itertuples()
+            )
+
+    purchase_map = purchases.assign(
+        subrubro_id=pd.to_numeric(purchases["subrubro_id"], errors="coerce").fillna(0).astype(int)
+    ).set_index("subrubro_id").to_dict("index")
+    priority_order = {"Piloto prioritario": 0, "Piloto supervisado": 1, "Piloto segmentado": 2}
+    rows: list[dict[str, object]] = []
+    for rule in applicable.itertuples():
+        purchase = purchase_map.get(int(rule.origen_id), {})
+        rows.append(
+            {
+                "prioridad": str(rule.decision).replace("Piloto ", "").capitalize(),
+                "_priority": priority_order.get(str(rule.decision), 9),
+                "_coincidence": float(rule.coincidencia),
+                "compro": str(rule.origen),
+                "ultima_compra": purchase.get("ultima_compra"),
+                "comprobantes": int(purchase.get("comprobantes", 0) or 0),
+                "facturacion_18m": float(purchase.get("facturacion", 0) or 0),
+                "oportunidad": str(rule.destino),
+                "sugerencia": str(rule.sugerencia),
+                "validar": str(rule.validacion),
+                "productos_disponibles": product_map.get(int(rule.destino_id), "Sin stock disponible"),
+            }
+        )
+
+    result = pd.DataFrame(rows).sort_values(
+        ["_priority", "facturacion_18m", "_coincidence"], ascending=[True, False, False]
+    )
+    return result.head(max(int(limite), 1)).loc[:, columns]
 
 
 def cliente_credito(
