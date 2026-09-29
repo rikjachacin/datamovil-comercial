@@ -87,6 +87,24 @@ SALES_ZONE_OVERRIDES = (
 )
 SALES_TOTAL_NEUTRALIZED_DOCUMENTS = (
     {
+        "date": "2026-09-28",
+        "client_id": "120303",
+        "source_zone": "JUAN C. MANZELLI",
+        "id_facturacion": "298967",
+        "invoice_numbers": ("8997",),
+        "document_types": ("NC",),
+        "note": "NC de Del Dago Martin Sebastian: afecta deuda, no facturacion de Juan C. Manzelli.",
+    },
+    {
+        "date": "2026-09-28",
+        "client_id": "104713",
+        "source_zone": "JUAN C. MANZELLI",
+        "id_facturacion": "298971",
+        "invoice_numbers": ("8998",),
+        "document_types": ("NC",),
+        "note": "NC de Cardozo Francisco Ramon: afecta deuda, no facturacion de Juan C. Manzelli.",
+    },
+    {
         "date": "2026-09-17",
         "client_id": "116027",
         "source_zone": "BRAVO",
