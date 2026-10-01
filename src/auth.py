@@ -86,7 +86,7 @@ DEFAULT_USERS: dict[str, dict[str, object]] = {
         "zones": ["LUCIA MORENO"],
     },
     "cecilia": {
-        "password_hash": "pbkdf2_sha256$260000$tzMNuaHMAtyrZA2fuRLJUZLXoPypJxN2$DosWO2L452e0tknIXA1aEcwZMRz_cGMSfMi-qfhR3YA",
+        "password_hash": "pbkdf2_sha256$260000$yALMvx0ItbbSpq0M9T42VLkzasDfbOKG$1QhL8c4CAwqxdulk-AxOc_Bm2Q-wklHaCjYbHg5zNDU",
         "name": "Cecilia",
         "role": "seller",
         "zones": ["CECILIA"],
