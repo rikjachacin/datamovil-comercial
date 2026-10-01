@@ -1920,6 +1920,7 @@ def show_commissions(current_user: auth.User, fecha_hasta_mes: date) -> None:
         "HOLLIDAY",
         "LABYES",
         "RICHMOND",
+        "INSTDERMATOLOGIAVET",
         "TOTAL",
     }
 

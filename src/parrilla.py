@@ -22,11 +22,17 @@ EXCLUDED_LABORATORIES: set[str] = set()
 LABORATORY_ALIASES = {
     "VACACIONES": "Holliday",
     "HOLLIDAY": "Holliday",
+    "RICHMOD": "Richmond",
+    "RICHMOND": "Richmond",
+    "RICHMONDDIVVET": "Richmond",
+    "INSTDERMATOLOGIAVET": "Inst. Dermatologia Vet",
+    "INSTDERMATOLOGIAVETSRL": "Inst. Dermatologia Vet",
 }
 
 VENDOR_ALIASES = {
     "BRAVO": "Bravo",
     "CARINA": "Carina",
+    "CECILIA": "Cecilia",
     "DAVID": "David",
     "FRANCISCO": "Francisco",
     "JONATAN": "Jonatan",

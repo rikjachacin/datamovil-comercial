@@ -24,6 +24,7 @@ NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 USER_VENDOR_MAP = {
     "bravo": "Bravo",
     "carina": "Carina",
+    "cecilia": "Cecilia",
     "david": "David",
     "francisco": "Francisco",
     "javier": "Javier",
