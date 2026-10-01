@@ -85,6 +85,12 @@ DEFAULT_USERS: dict[str, dict[str, object]] = {
         "role": "seller",
         "zones": ["LUCIA MORENO"],
     },
+    "cecilia": {
+        "password_hash": "pbkdf2_sha256$260000$tzMNuaHMAtyrZA2fuRLJUZLXoPypJxN2$DosWO2L452e0tknIXA1aEcwZMRz_cGMSfMi-qfhR3YA",
+        "name": "Cecilia",
+        "role": "seller",
+        "zones": ["CECILIA"],
+    },
     "jonatan": {
         "password_hash": "pbkdf2_sha256$260000$f3TvCQ1vCcvC_biP_C090N7W4Ni_6UkO$bRz9QRa9BWnsE0DQtlWWc_A7ZQesSXLTtF5uDoMUbn0",
         "name": "Jonatan Mercao",
