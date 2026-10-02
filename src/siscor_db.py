@@ -185,6 +185,38 @@ def get_config() -> SisCorConfig:
         return _config_from_siscor_file()
 
 
+def _connection_configs() -> tuple[SisCorConfig, ...]:
+    """Return the available SQL configurations without exposing credentials."""
+    configs: list[SisCorConfig] = []
+    try:
+        configs.append(get_config())
+    except Exception:
+        pass
+
+    if SISCOR_CONFIG_PATH.exists():
+        try:
+            file_config = _config_from_siscor_file()
+            identity = (
+                file_config.server,
+                file_config.database,
+                file_config.username,
+                file_config.password,
+                file_config.driver,
+            )
+            if all(
+                identity
+                != (config.server, config.database, config.username, config.password, config.driver)
+                for config in configs
+            ):
+                configs.append(file_config)
+        except Exception:
+            pass
+
+    if not configs:
+        raise RuntimeError("No se encontro una configuracion valida para conectar con SisCor.")
+    return tuple(configs)
+
+
 def _has_sql_config() -> bool:
     try:
         secrets = st.secrets["siscor"]
@@ -393,14 +425,28 @@ def connection_string(config: SisCorConfig | None = None) -> str:
     )
 
 
+def _connect() -> pyodbc.Connection:
+    first_error: pyodbc.Error | None = None
+    for config in _connection_configs():
+        try:
+            return pyodbc.connect(connection_string(config), timeout=8)
+        except pyodbc.Error as exc:
+            if first_error is None:
+                first_error = exc
+
+    if first_error is not None:
+        raise first_error
+    raise RuntimeError("No se pudo iniciar la conexion de solo lectura con SisCor.")
+
+
 @st.cache_resource(show_spinner=False)
 def get_connection() -> pyodbc.Connection:
-    return pyodbc.connect(connection_string(), timeout=8)
+    return _connect()
 
 
 @st.cache_data(ttl=SQL_QUERY_TTL_SECONDS, show_spinner=False)
 def read_sql(query: str, params: tuple[Any, ...] = ()) -> pd.DataFrame:
-    with pyodbc.connect(connection_string(), timeout=8) as conn:
+    with _connect() as conn:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
