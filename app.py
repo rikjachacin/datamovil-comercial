@@ -1725,7 +1725,7 @@ def show_fluralaner_metrics(
     st.markdown(
         render_module_heading(
             "Metricas Fluralaner",
-            "Campana acumulada hasta el 30/09/2026",
+            "Campana del 01/10/2026 al 31/12/2026",
             "products",
             "F",
         ),
@@ -1755,10 +1755,7 @@ def show_fluralaner_metrics(
     detail = fluralaner.convert_display_units(detail)
 
     product_order = list(fluralaner.PRODUCT_ORDER)
-    st.caption(
-        "Feline Full desde 01/07/2026. Bit Trio y Zanex desde 01/08/2026. "
-        "Ectholaner desde 01/09/2026."
-    )
+    st.caption("Bit Trio, Ectholaner y Zanex medidos desde el 01/10/2026 hasta el 31/12/2026.")
     if seller_view:
         seller_table = fluralaner.seller_summary(detail, zonas).rename(
             columns={
@@ -1822,7 +1819,6 @@ def show_fluralaner_metrics(
             orientation="h",
             category_orders={"zona": zone_order, "producto": product_order},
             color_discrete_map={
-                "Feline Full": "#2563eb",
                 "Bit Trio": "#0f766e",
                 "Zanex": "#d9b51f",
                 "Ectholaner": "#b42318",
@@ -1862,7 +1858,6 @@ def show_fluralaner_metrics(
             hide_index=True,
             column_config={
                 "zona": "Zona",
-                "Feline Full": st.column_config.NumberColumn("Feline Full", format="%.0f"),
                 "Bit Trio": st.column_config.NumberColumn("Bit Trio", format="%.0f"),
                 "Zanex": st.column_config.NumberColumn("Zanex", format="%.0f"),
                 "Ectholaner": st.column_config.NumberColumn("Ectholaner", format="%.0f"),

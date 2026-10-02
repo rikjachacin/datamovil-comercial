@@ -11,7 +11,7 @@ from cryptography.fernet import Fernet
 DATA_DIR = Path("data")
 KEY_PATH = DATA_DIR / "snapshot.key"
 OUTPUT_PATH = DATA_DIR / "fluralaner_objetivos.csv.enc"
-PRODUCTS = ("Feline Full", "Bit Trio", "Ectholaner", "Zanex")
+PRODUCTS = ("Bit Trio", "Ectholaner", "Zanex")
 ZONE_ALIASES = {
     "JULIO MARTINEZ": "JONATAN MERCAO",
 }

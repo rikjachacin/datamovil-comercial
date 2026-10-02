@@ -12,20 +12,18 @@ from src import siscor_db
 
 OBJECTIVES_PATH = Path("data/fluralaner_objetivos.csv")
 ENCRYPTED_OBJECTIVES_PATH = Path("data/fluralaner_objetivos.csv.enc")
-PRODUCT_ORDER = ("Feline Full", "Bit Trio", "Ectholaner", "Zanex")
+PRODUCT_ORDER = ("Bit Trio", "Ectholaner", "Zanex")
 INCENTIVE_PER_UNIT = {
-    "Feline Full": 600.0,
     "Bit Trio": 750.0,
     "Ectholaner": 500.0,
     "Zanex": 0.0,
 }
 REQUIRED_COLUMNS = ("zona", "producto", "objetivo")
-CAMPAIGN_END_DATE = date(2026, 9, 30)
+CAMPAIGN_END_DATE = date(2026, 12, 31)
 PRODUCT_START_DATES = {
-    "Feline Full": date(2026, 7, 1),
-    "Bit Trio": date(2026, 8, 1),
-    "Ectholaner": date(2026, 9, 1),
-    "Zanex": date(2026, 8, 1),
+    "Bit Trio": date(2026, 10, 1),
+    "Ectholaner": date(2026, 10, 1),
+    "Zanex": date(2026, 10, 1),
 }
 SALES_ZONE_REASSIGNMENTS = {
     "FRANCISCO": "JUAN C. MANZELLI",
