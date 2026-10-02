@@ -10,6 +10,7 @@ data/*.csv
 data/*.parquet
 data/*.key
 data/*.sqlite*
+data/siscor_runtime.json
 data/comisiones/*.xlsx
 data/informes_semanales/*.xlsx
 *.ovpn

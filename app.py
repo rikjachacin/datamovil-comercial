@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 from datetime import date, timedelta
+import hashlib
+import hmac
 import html
 import math
 from pathlib import Path
@@ -883,6 +885,46 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+SISCOR_REPAIR_TOKEN_HASH = "f54a4d88a51c7929d9c971769e9cbd29c742c784a091370f5f165a6e3a6f2d65"
+
+
+def show_siscor_repair() -> None:
+    repair_token = str(st.query_params.get("siscor_repair", ""))
+    if not repair_token:
+        return
+    if not hmac.compare_digest(hashlib.sha256(repair_token.encode()).hexdigest(), SISCOR_REPAIR_TOKEN_HASH):
+        st.error("Enlace de reparacion invalido.")
+        st.stop()
+
+    st.title("Reparar conexion de SisCor")
+    st.caption("La configuracion se guarda solamente en este servidor.")
+    with st.form("siscor_repair_form"):
+        server = st.text_input("Servidor", value="10.8.0.1,50672")
+        database = st.text_input("Base", value="d_bruncas")
+        username = st.text_input("Usuario SQL")
+        password = st.text_input("Contrasena SQL", type="password")
+        submitted = st.form_submit_button("Validar y guardar")
+
+    if submitted:
+        try:
+            siscor_db.install_runtime_config(
+                siscor_db.SisCorConfig(
+                    server=server.strip(),
+                    database=database.strip(),
+                    username=username.strip(),
+                    password=password,
+                )
+            )
+        except Exception:
+            st.error("La credencial no pudo validarse. No se guardaron cambios.")
+        else:
+            st.success("Conexion validada y guardada correctamente.")
+    st.stop()
+
+
+show_siscor_repair()
 
 
 def money(value: object) -> str:

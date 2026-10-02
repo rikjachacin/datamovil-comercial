@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any
+import json
 import math
 import os
 import re
@@ -23,6 +24,7 @@ except ImportError:
 
 
 SISCOR_CONFIG_PATH = Path(r"C:\SisCor\SisCor.exe.config")
+RUNTIME_CONFIG_PATH = Path("data/siscor_runtime.json")
 SNAPSHOT_DIR = Path("data")
 SAMPLE_FACTURAS_PATH = SNAPSHOT_DIR / "sample_facturas.csv"
 SAMPLE_FACTURA_ITEMS_PATH = SNAPSHOT_DIR / "sample_factura_items.csv"
@@ -172,6 +174,19 @@ def _config_from_siscor_file(path: Path = SISCOR_CONFIG_PATH) -> SisCorConfig:
 
 
 def get_config() -> SisCorConfig:
+    if RUNTIME_CONFIG_PATH.exists():
+        try:
+            payload = json.loads(RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
+            return SisCorConfig(
+                server=str(payload["server"]),
+                database=str(payload["database"]),
+                username=str(payload["username"]),
+                password=str(payload["password"]),
+                driver=str(payload.get("driver", DEFAULT_DRIVER)),
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
     try:
         secrets = st.secrets["siscor"]
         return SisCorConfig(
@@ -438,6 +453,30 @@ def connection_string(config: SisCorConfig | None = None) -> str:
         f"{authentication}"
         "TrustServerCertificate=yes;"
     )
+
+
+def install_runtime_config(config: SisCorConfig) -> None:
+    with pyodbc.connect(connection_string(config), timeout=8) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SET NOCOUNT ON; SELECT DB_NAME();")
+        if cursor.fetchone()[0] != config.database:
+            raise RuntimeError("La conexion no corresponde a la base solicitada.")
+
+    RUNTIME_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = RUNTIME_CONFIG_PATH.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps(
+            {
+                "server": config.server,
+                "database": config.database,
+                "username": config.username,
+                "password": config.password,
+                "driver": config.driver,
+            }
+        ),
+        encoding="utf-8",
+    )
+    temporary_path.replace(RUNTIME_CONFIG_PATH)
 
 
 def _connect() -> pyodbc.Connection:
