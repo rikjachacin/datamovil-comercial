@@ -212,6 +212,17 @@ def _connection_configs() -> tuple[SisCorConfig, ...]:
         except Exception:
             pass
 
+    if configs:
+        primary = configs[0]
+        integrated_config = SisCorConfig(
+            server=primary.server,
+            database=primary.database,
+            username="",
+            password="",
+            driver=primary.driver,
+        )
+        configs.append(integrated_config)
+
     if not configs:
         raise RuntimeError("No se encontro una configuracion valida para conectar con SisCor.")
     return tuple(configs)
@@ -415,12 +426,16 @@ def _read_snapshot_csv(filename: str, sample_path: Path) -> pd.DataFrame:
 
 def connection_string(config: SisCorConfig | None = None) -> str:
     cfg = config or get_config()
+    authentication = (
+        f"UID={cfg.username};PWD={cfg.password};"
+        if cfg.username or cfg.password
+        else "Trusted_Connection=yes;"
+    )
     return (
         f"DRIVER={{{cfg.driver}}};"
         f"SERVER={cfg.server};"
         f"DATABASE={cfg.database};"
-        f"UID={cfg.username};"
-        f"PWD={cfg.password};"
+        f"{authentication}"
         "TrustServerCertificate=yes;"
     )
 
