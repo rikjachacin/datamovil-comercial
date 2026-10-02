@@ -455,30 +455,6 @@ def connection_string(config: SisCorConfig | None = None) -> str:
     )
 
 
-def install_runtime_config(config: SisCorConfig) -> None:
-    with pyodbc.connect(connection_string(config), timeout=8) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SET NOCOUNT ON; SELECT DB_NAME();")
-        if cursor.fetchone()[0] != config.database:
-            raise RuntimeError("La conexion no corresponde a la base solicitada.")
-
-    RUNTIME_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = RUNTIME_CONFIG_PATH.with_suffix(".tmp")
-    temporary_path.write_text(
-        json.dumps(
-            {
-                "server": config.server,
-                "database": config.database,
-                "username": config.username,
-                "password": config.password,
-                "driver": config.driver,
-            }
-        ),
-        encoding="utf-8",
-    )
-    temporary_path.replace(RUNTIME_CONFIG_PATH)
-
-
 def _connect() -> pyodbc.Connection:
     first_error: pyodbc.Error | None = None
     for config in _connection_configs():
