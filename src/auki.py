@@ -6,7 +6,7 @@ import math
 import pandas as pd
 
 
-CAMPAIGN_START_DATE = date(2026, 6, 25)
+CAMPAIGN_START_DATE = date(2026, 10, 1)
 CAMPAIGN_END_DATE = date(2026, 10, 31)
 TARGET_COVERAGE = 0.30
 BOX_CODES = ("AUKI04", "AUKI08")

@@ -1885,7 +1885,7 @@ def _show_auki_metrics(fecha_hasta_sql: str, zonas: tuple[str, ...]) -> None:
     summary = auki.coverage_summary(buyers, zonas)
 
     st.caption(
-        f"Campana del 25/06/2026 al 31/10/2026. Datos al {cutoff.strftime('%d/%m/%Y')}. "
+        f"Campana del 01/10/2026 al 31/10/2026. Datos al {cutoff.strftime('%d/%m/%Y')}. "
         "Un cliente cuenta solo si compro al menos una caja neta de Auki; "
         "los sobres individuales no cuentan."
     )
