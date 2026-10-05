@@ -1886,8 +1886,8 @@ def _show_auki_metrics(fecha_hasta_sql: str, zonas: tuple[str, ...]) -> None:
 
     st.caption(
         f"Campana del 01/10/2026 al 31/10/2026. Datos al {cutoff.strftime('%d/%m/%Y')}. "
-        "Un cliente cuenta solo si compro al menos una caja neta de Auki; "
-        "los sobres individuales no cuentan."
+        "Un cliente cuenta al alcanzar una caja neta: 30 unidades de 100 g o "
+        "9 unidades de 500 g. Las presentaciones no se mezclan."
     )
     if summary.empty:
         st.info("No hay zonas evaluables para esta vista.")
@@ -1937,6 +1937,8 @@ def _show_auki_metrics(fecha_hasta_sql: str, zonas: tuple[str, ...]) -> None:
             "zona": "Zona",
             "id_cliente": "Codigo cliente",
             "cliente": "Cliente",
+            "cajas_100g": st.column_config.NumberColumn("Cajas 100 g", format="%d"),
+            "cajas_500g": st.column_config.NumberColumn("Cajas 500 g", format="%d"),
             "cajas_netas": st.column_config.NumberColumn("Cajas netas", format="%.0f"),
             "primera_compra": st.column_config.DateColumn("Primera compra", format="DD/MM/YYYY"),
             "ultima_compra": st.column_config.DateColumn("Ultima compra", format="DD/MM/YYYY"),

@@ -1275,8 +1275,53 @@ def clientes_auki_con_caja(
     fecha_hasta: str,
     zonas_filtro: tuple[str, ...] = (),
 ) -> pd.DataFrame:
-    """Return current customers with at least one net Auki box in the period."""
-    columns = ["zona", "id_cliente", "cliente", "cajas_netas", "primera_compra", "ultima_compra"]
+    """Return current customers that reached one net Auki box equivalent."""
+    columns = [
+        "zona",
+        "id_cliente",
+        "cliente",
+        "cajas_100g",
+        "cajas_500g",
+        "cajas_netas",
+        "primera_compra",
+        "ultima_compra",
+    ]
+
+    def consolidate(sales: pd.DataFrame) -> pd.DataFrame:
+        if sales.empty:
+            return pd.DataFrame(columns=columns)
+        base = sales.copy()
+        base["codigo"] = base["codigo"].fillna("").astype(str).str.strip().str.upper()
+        base["unidades_netas"] = _to_numeric_amount(base["unidades_netas"])
+        base["unidades_100g"] = base["unidades_netas"].where(
+            base["codigo"].isin(("AUKI01", "AUKI02", "AUKI03")), 0
+        )
+        base["cajas_directas_100g"] = base["unidades_netas"].where(base["codigo"].eq("AUKI04"), 0)
+        base["unidades_500g"] = base["unidades_netas"].where(
+            base["codigo"].isin(("AUKI05", "AUKI06", "AUKI07")), 0
+        )
+        base["cajas_directas_500g"] = base["unidades_netas"].where(base["codigo"].eq("AUKI08"), 0)
+        grouped = (
+            base.groupby(["zona", "id_cliente", "cliente"], as_index=False)
+            .agg(
+                unidades_100g=("unidades_100g", "sum"),
+                cajas_directas_100g=("cajas_directas_100g", "sum"),
+                unidades_500g=("unidades_500g", "sum"),
+                cajas_directas_500g=("cajas_directas_500g", "sum"),
+                primera_compra=("primera_compra", "min"),
+                ultima_compra=("ultima_compra", "max"),
+            )
+        )
+        grouped["cajas_100g"] = (
+            grouped["cajas_directas_100g"]
+            + grouped["unidades_100g"].clip(lower=0).floordiv(30)
+        ).clip(lower=0).astype(int)
+        grouped["cajas_500g"] = (
+            grouped["cajas_directas_500g"]
+            + grouped["unidades_500g"].clip(lower=0).floordiv(9)
+        ).clip(lower=0).astype(int)
+        grouped["cajas_netas"] = grouped["cajas_100g"] + grouped["cajas_500g"]
+        return grouped[grouped["cajas_netas"] >= 1].loc[:, columns]
 
     if data_mode() == "snapshot":
         facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[
@@ -1287,28 +1332,33 @@ def clientes_auki_con_caja(
         if df.empty:
             return pd.DataFrame(columns=columns)
         names = df["producto"].fillna("").astype(str).str.strip().str.upper()
-        is_box = names.str.contains("AUKI BOCADITOS CAJA DISPENSER", regex=False) | names.str.contains(
-            "AUKI BOCADITOS CAJA DOYPACKS", regex=False
-        )
-        df = df[is_box].copy()
+        is_auki = names.str.startswith("AUKI BOCADITOS")
+        df = df[is_auki].copy()
+        names = df["producto"].fillna("").astype(str).str.strip().str.upper()
+        df["codigo"] = ""
+        df.loc[names.str.contains(" 100 GR", regex=False), "codigo"] = "AUKI01"
+        df.loc[names.str.contains(" 500 GR", regex=False), "codigo"] = "AUKI05"
+        df.loc[names.str.contains("CAJA DISPENSER", regex=False), "codigo"] = "AUKI04"
+        df.loc[names.str.contains("CAJA DOYPACKS", regex=False), "codigo"] = "AUKI08"
+        df = df[df["codigo"].ne("")].copy()
         if df.empty:
             return pd.DataFrame(columns=columns)
         sign = _negative_document_mask(df["tipo"]).map(lambda negative: -1 if negative else 1)
-        df["cajas_firmadas"] = _to_numeric_amount(df["cantidad"]) * sign
+        df["unidades_netas"] = _to_numeric_amount(df["cantidad"]) * sign
         df["fecha_compra"] = pd.to_datetime(df["fecha"], errors="coerce").where(sign > 0)
-        result = (
-            df.groupby(["zona", "id_cliente", "cliente"], as_index=False)
+        sales = (
+            df.groupby(["zona", "id_cliente", "cliente", "codigo"], as_index=False)
             .agg(
-                cajas_netas=("cajas_firmadas", "sum"),
+                unidades_netas=("unidades_netas", "sum"),
                 primera_compra=("fecha_compra", "min"),
                 ultima_compra=("fecha_compra", "max"),
             )
         )
-        return result[result["cajas_netas"] >= 1].loc[:, columns]
+        return consolidate(sales)
 
     zona_sql, zona_params = _zona_filter("c", zonas_filtro, "c.zona")
     signed_quantity = _signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")
-    return read_sql(
+    sales = read_sql(
         f"""
         SET NOCOUNT ON;
         WITH clientes_rankeados AS (
@@ -1336,7 +1386,8 @@ def clientes_auki_con_caja(
             c.zona,
             CAST(c.id_cliente AS varchar(50)) AS id_cliente,
             c.cliente,
-            SUM({signed_quantity}) AS cajas_netas,
+            UPPER(LTRIM(RTRIM(COALESCE(p.codigo_ariculo, '')))) AS codigo,
+            SUM({signed_quantity}) AS unidades_netas,
             MIN(CASE WHEN f.tipo <> 'NC' THEN CAST(f.fecha AS date) END) AS primera_compra,
             MAX(CASE WHEN f.tipo <> 'NC' THEN CAST(f.fecha AS date) END) AS ultima_compra
         FROM clientes_actuales c
@@ -1347,14 +1398,18 @@ def clientes_auki_con_caja(
           {_authorized_invoice_filter("f")}
           AND CAST(f.fecha AS date) BETWEEN ? AND ?
           {_commercial_document_filter("f")}
-          AND UPPER(LTRIM(RTRIM(COALESCE(p.codigo_ariculo, '')))) IN ('AUKI04', 'AUKI08')
+          AND UPPER(LTRIM(RTRIM(COALESCE(p.codigo_ariculo, '')))) IN (
+              'AUKI01', 'AUKI02', 'AUKI03', 'AUKI04',
+              'AUKI05', 'AUKI06', 'AUKI07', 'AUKI08'
+          )
           {zona_sql}
-        GROUP BY c.zona, c.id_cliente, c.cliente
-        HAVING SUM({signed_quantity}) >= 1
-        ORDER BY c.zona, c.cliente;
+        GROUP BY c.zona, c.id_cliente, c.cliente,
+                 UPPER(LTRIM(RTRIM(COALESCE(p.codigo_ariculo, ''))))
+        ORDER BY c.zona, c.cliente, codigo;
         """,
         (fecha_desde, fecha_hasta, *zona_params),
-    ).loc[:, columns]
+    )
+    return consolidate(sales)
 
 
 def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:

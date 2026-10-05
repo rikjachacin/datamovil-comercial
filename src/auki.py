@@ -9,7 +9,10 @@ import pandas as pd
 CAMPAIGN_START_DATE = date(2026, 10, 1)
 CAMPAIGN_END_DATE = date(2026, 10, 31)
 TARGET_COVERAGE = 0.30
-BOX_CODES = ("AUKI04", "AUKI08")
+LOOSE_100G_CODES = ("AUKI01", "AUKI02", "AUKI03")
+BOX_100G_CODE = "AUKI04"
+LOOSE_500G_CODES = ("AUKI05", "AUKI06", "AUKI07")
+BOX_500G_CODE = "AUKI08"
 
 # Bases congeladas para que la meta de octubre no cambie por reasignaciones.
 # Lucia se evalua sobre sus 93 clientes activos de los ultimos cuatro meses.
