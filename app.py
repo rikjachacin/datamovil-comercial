@@ -17,7 +17,7 @@ from src import auth
 from src import anura_api
 from src import clientify_api
 from src import commissions
-from src import fluralaner
+from src import auki, fluralaner
 from src import objectives
 from src import parrilla
 from src import persat_api
@@ -1716,22 +1716,12 @@ def show_overdue_portfolio(zones: tuple[str, ...]) -> None:
     )
 
 
-def show_fluralaner_metrics(
+def _show_fluralaner_campaign(
     _fecha_desde_sql: str,
     fecha_hasta_sql: str,
     zonas: tuple[str, ...],
     seller_view: bool = False,
 ) -> None:
-    st.markdown(
-        render_module_heading(
-            "Metricas Fluralaner",
-            "Campana del 01/10/2026 al 31/12/2026",
-            "products",
-            "F",
-        ),
-        unsafe_allow_html=True,
-    )
-
     query_zones = fluralaner.sales_query_zones(zonas)
     campaign_frames = []
     for start_date, end_date, products in fluralaner.campaign_sales_windows(fecha_hasta_sql):
@@ -1883,6 +1873,97 @@ def show_fluralaner_metrics(
                     "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
                 },
             )
+
+
+def _show_auki_metrics(fecha_hasta_sql: str, zonas: tuple[str, ...]) -> None:
+    cutoff = auki.campaign_cutoff(fecha_hasta_sql)
+    buyers = siscor_db.clientes_auki_con_caja(
+        auki.CAMPAIGN_START_DATE.isoformat(),
+        cutoff.isoformat(),
+        zonas,
+    )
+    summary = auki.coverage_summary(buyers, zonas)
+
+    st.caption(
+        f"Campana del 25/06/2026 al 31/10/2026. Datos al {cutoff.strftime('%d/%m/%Y')}. "
+        "Un cliente cuenta solo si compro al menos una caja neta de Auki; "
+        "los sobres individuales no cuentan."
+    )
+    if summary.empty:
+        st.info("No hay zonas evaluables para esta vista.")
+        return
+
+    total_base = int(summary["base_evaluable"].sum())
+    total_buyers = int(summary["clientes_con_caja"].sum())
+    total_missing = int(summary["faltan"].sum())
+    coverage = 100 * total_buyers / total_base if total_base else 0
+
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Base evaluable", number(total_base))
+    metric_columns[1].metric("Clientes con caja", number(total_buyers))
+    metric_columns[2].metric("Cobertura actual", f"{coverage:.1f}%")
+    metric_columns[3].metric("Faltan para la meta", number(total_missing))
+
+    st.markdown("#### Cobertura por zona")
+    st.dataframe(
+        summary,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "zona": "Zona",
+            "base_evaluable": st.column_config.NumberColumn("Base evaluable", format="%d"),
+            "clientes_con_caja": st.column_config.NumberColumn("Clientes con caja", format="%d"),
+            "meta_clientes": st.column_config.NumberColumn("Meta 30%", format="%d"),
+            "faltan": st.column_config.NumberColumn("Faltan", format="%d"),
+            "cobertura_pct": st.column_config.NumberColumn("Cobertura", format="%.1f%%"),
+            "cumplimiento_pct": st.column_config.NumberColumn(
+                "Cumplimiento de meta", format="%.1f%%"
+            ),
+        },
+    )
+
+    st.markdown("#### Clientes contabilizados")
+    if buyers.empty:
+        st.info("Todavia no hay clientes con una compra neta de al menos una caja.")
+        return
+    detail = buyers.copy()
+    detail["primera_compra"] = pd.to_datetime(detail["primera_compra"], errors="coerce")
+    detail["ultima_compra"] = pd.to_datetime(detail["ultima_compra"], errors="coerce")
+    st.dataframe(
+        detail,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "zona": "Zona",
+            "id_cliente": "Codigo cliente",
+            "cliente": "Cliente",
+            "cajas_netas": st.column_config.NumberColumn("Cajas netas", format="%.0f"),
+            "primera_compra": st.column_config.DateColumn("Primera compra", format="DD/MM/YYYY"),
+            "ultima_compra": st.column_config.DateColumn("Ultima compra", format="DD/MM/YYYY"),
+        },
+    )
+
+
+def show_fluralaner_metrics(
+    fecha_desde_sql: str,
+    fecha_hasta_sql: str,
+    zonas: tuple[str, ...],
+    seller_view: bool = False,
+) -> None:
+    st.markdown(
+        render_module_heading(
+            "Metricas de productos",
+            "Seguimiento de las campanas Fluralaner y Auki",
+            "products",
+            "M",
+        ),
+        unsafe_allow_html=True,
+    )
+    tab_fluralaner, tab_auki = st.tabs(["Fluralaner", "Auki"])
+    with tab_fluralaner:
+        _show_fluralaner_campaign(fecha_desde_sql, fecha_hasta_sql, zonas, seller_view)
+    with tab_auki:
+        _show_auki_metrics(fecha_hasta_sql, zonas)
 
 
 def show_commissions(current_user: auth.User, fecha_hasta_mes: date) -> None:

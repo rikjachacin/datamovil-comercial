@@ -1270,6 +1270,93 @@ def metricas_fluralaner(
     )
 
 
+def clientes_auki_con_caja(
+    fecha_desde: str,
+    fecha_hasta: str,
+    zonas_filtro: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Return current customers with at least one net Auki box in the period."""
+    columns = ["zona", "id_cliente", "cliente", "cajas_netas", "primera_compra", "ultima_compra"]
+
+    if data_mode() == "snapshot":
+        facturas = _snapshot_filtered_facturas(fecha_desde, fecha_hasta, zonas_filtro)[
+            ["id_facturacion", "id_cliente", "cliente", "zona", "fecha", "tipo"]
+        ]
+        items = _snapshot_factura_items()
+        df = items.merge(facturas, on="id_facturacion", how="inner")
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+        names = df["producto"].fillna("").astype(str).str.strip().str.upper()
+        is_box = names.str.contains("AUKI BOCADITOS CAJA DISPENSER", regex=False) | names.str.contains(
+            "AUKI BOCADITOS CAJA DOYPACKS", regex=False
+        )
+        df = df[is_box].copy()
+        if df.empty:
+            return pd.DataFrame(columns=columns)
+        sign = _negative_document_mask(df["tipo"]).map(lambda negative: -1 if negative else 1)
+        df["cajas_firmadas"] = _to_numeric_amount(df["cantidad"]) * sign
+        df["fecha_compra"] = pd.to_datetime(df["fecha"], errors="coerce").where(sign > 0)
+        result = (
+            df.groupby(["zona", "id_cliente", "cliente"], as_index=False)
+            .agg(
+                cajas_netas=("cajas_firmadas", "sum"),
+                primera_compra=("fecha_compra", "min"),
+                ultima_compra=("fecha_compra", "max"),
+            )
+        )
+        return result[result["cajas_netas"] >= 1].loc[:, columns]
+
+    zona_sql, zona_params = _zona_filter("c", zonas_filtro, "c.zona")
+    signed_quantity = _signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH clientes_rankeados AS (
+            SELECT
+                c.id_cliente,
+                COALESCE(NULLIF(c.razon_social, ''), NULLIF(cs.nombre_comercial, ''), CONCAT('Cliente ', c.id_cliente)) AS cliente,
+                COALESCE(NULLIF(z.descripcion, ''), 'Sin zona') AS zona,
+                ROW_NUMBER() OVER (
+                    PARTITION BY c.id_cliente
+                    ORDER BY
+                        CASE WHEN NULLIF(z.descripcion, '') IS NULL THEN 1 ELSE 0 END,
+                        cs.id_cliente_sucursal DESC
+                ) AS orden
+            FROM dbo.cli_cliente c
+            INNER JOIN dbo.cli_sucursal cs ON cs.id_cliente = c.id_cliente
+            LEFT JOIN dbo.tg_zona z ON z.id_zona = cs.id_zona
+            WHERE ISNULL(c.activo, 0) = 1
+              AND ISNULL(cs.activo, 0) = 1
+        ), clientes_actuales AS (
+            SELECT id_cliente, cliente, zona
+            FROM clientes_rankeados
+            WHERE orden = 1
+        )
+        SELECT
+            c.zona,
+            CAST(c.id_cliente AS varchar(50)) AS id_cliente,
+            c.cliente,
+            SUM({signed_quantity}) AS cajas_netas,
+            MIN(CASE WHEN f.tipo <> 'NC' THEN CAST(f.fecha AS date) END) AS primera_compra,
+            MAX(CASE WHEN f.tipo <> 'NC' THEN CAST(f.fecha AS date) END) AS ultima_compra
+        FROM clientes_actuales c
+        INNER JOIN dbo.cli_factura f ON f.id_cliente = c.id_cliente
+        INNER JOIN dbo.cli_factura_item fi ON fi.id_facturacion = f.id_facturacion
+        LEFT JOIN dbo.pro_producto p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND CAST(f.fecha AS date) BETWEEN ? AND ?
+          {_commercial_document_filter("f")}
+          AND UPPER(LTRIM(RTRIM(COALESCE(p.codigo_ariculo, '')))) IN ('AUKI04', 'AUKI08')
+          {zona_sql}
+        GROUP BY c.zona, c.id_cliente, c.cliente
+        HAVING SUM({signed_quantity}) >= 1
+        ORDER BY c.zona, c.cliente;
+        """,
+        (fecha_desde, fecha_hasta, *zona_params),
+    ).loc[:, columns]
+
+
 def ventas_por_marca(fecha_desde: str, fecha_hasta: str, zonas_filtro: tuple[str, ...] = ()) -> pd.DataFrame:
     columns = ["zona", "marca", "total"]
     if data_mode() == "snapshot":
