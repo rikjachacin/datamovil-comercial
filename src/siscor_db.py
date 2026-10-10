@@ -33,6 +33,55 @@ SAMPLE_CLIENTES_PATH = SNAPSHOT_DIR / "sample_clientes.csv"
 SAMPLE_CREDITOS_PATH = SNAPSHOT_DIR / "sample_creditos.csv"
 SNAPSHOT_KEY_PATH = SNAPSHOT_DIR / "snapshot.key"
 CROSS_SELLING_RULES_PATH = SNAPSHOT_DIR / "cross_selling_rules.csv.enc"
+CROSS_SELLING_AFFINITY_PATH = SNAPSHOT_DIR / "cross_selling_affinity.csv.enc"
+PRIORITY_CROSS_SELLING_SUBRUBROS = (
+    ("ANTIPARASITARIOS EXT", 26.68),
+    ("VACUNAS", 11.12),
+    ("ANTIBIOTICOS", 5.63),
+    ("ANTIPARASITARIOS INT", 4.58),
+    ("ANTIPARASITARIOS EXT E INT", 4.49),
+    ("SHAMPOOS Y CREMAS DE ENJUAGUE", 3.93),
+    ("CONDROPROTECTORES", 3.91),
+    ("DIGESTIVOS", 2.85),
+    ("BALANCEADOS", 2.72),
+    ("ANESTESICOS", 2.08),
+    ("DERMICOS", 1.98),
+    ("MEDICADOS", 1.96),
+    ("CORTICOIDES", 1.90),
+    ("CARDIACOS", 1.67),
+    ("COLCHONETAS Y MOISES", 1.34),
+    ("REPELENTES/INSECTICIDAS", 1.19),
+    ("ANTICONVULSIVOS", 1.18),
+    ("ANALGESICOS", 1.17),
+)
+CROSS_SELLING_COMPLEMENTS = {
+    "ANTIPARASITARIOS EXT": {
+        "ANTIPARASITARIOS INT",
+        "ANTIPARASITARIOS EXT E INT",
+        "SHAMPOOS Y CREMAS DE ENJUAGUE",
+        "REPELENTES/INSECTICIDAS",
+    },
+    "VACUNAS": {"ANTIPARASITARIOS EXT", "ANTIPARASITARIOS INT"},
+    "ANTIBIOTICOS": {"DIGESTIVOS", "DERMICOS"},
+    "ANTIPARASITARIOS INT": {
+        "ANTIPARASITARIOS EXT",
+        "ANTIPARASITARIOS EXT E INT",
+        "DIGESTIVOS",
+    },
+    "ANTIPARASITARIOS EXT E INT": {"SHAMPOOS Y CREMAS DE ENJUAGUE", "REPELENTES/INSECTICIDAS"},
+    "SHAMPOOS Y CREMAS DE ENJUAGUE": {"DERMICOS", "REPELENTES/INSECTICIDAS", "ANTIPARASITARIOS EXT"},
+    "CONDROPROTECTORES": {"ANALGESICOS", "CORTICOIDES"},
+    "DIGESTIVOS": {"MEDICADOS", "ANTIBIOTICOS"},
+    "BALANCEADOS": {"MEDICADOS", "DIGESTIVOS"},
+    "ANESTESICOS": {"ANALGESICOS", "ANTIBIOTICOS"},
+    "DERMICOS": {"SHAMPOOS Y CREMAS DE ENJUAGUE", "ANTIBIOTICOS", "CORTICOIDES"},
+    "MEDICADOS": {"BALANCEADOS", "DIGESTIVOS"},
+    "CORTICOIDES": {"DERMICOS", "ANALGESICOS"},
+    "CARDIACOS": {"MEDICADOS"},
+    "REPELENTES/INSECTICIDAS": {"ANTIPARASITARIOS EXT", "SHAMPOOS Y CREMAS DE ENJUAGUE"},
+    "ANTICONVULSIVOS": {"MEDICADOS"},
+    "ANALGESICOS": {"ANESTESICOS", "CONDROPROTECTORES"},
+}
 DEFAULT_DRIVER = "ODBC Driver 17 for SQL Server"
 SQL_QUERY_TTL_SECONDS = 120
 EXCLUDED_COMMERCIAL_ZONES = ("PROVEEDORES",)
@@ -1787,19 +1836,91 @@ def _cross_selling_rules() -> pd.DataFrame:
     return rules.loc[:, columns]
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cross_selling_affinity(fecha_hasta: str, recalcular: bool = False) -> pd.DataFrame:
+    """Afinidad entre subrubros prioritarios observada en clientes reales."""
+    columns = [
+        "origen_id",
+        "origen",
+        "destino_id",
+        "destino",
+        "clientes_origen",
+        "clientes_destino",
+        "clientes_ambos",
+        "clientes_total",
+    ]
+    if data_mode() == "snapshot":
+        return pd.DataFrame(columns=columns)
+
+    if not recalcular and CROSS_SELLING_AFFINITY_PATH.exists() and Fernet is not None:
+        key = _snapshot_key()
+        if key:
+            try:
+                payload = Fernet(key.encode("utf-8")).decrypt(CROSS_SELLING_AFFINITY_PATH.read_bytes())
+                stored = pd.read_csv(StringIO(payload.decode("utf-8")))
+                if set(columns).issubset(stored.columns):
+                    return stored.loc[:, columns]
+            except (InvalidToken, ValueError):
+                pass
+
+    names = tuple(name for name, _ in PRIORITY_CROSS_SELLING_SUBRUBROS)
+    placeholders = ", ".join("?" for _ in names)
+    return read_sql(
+        f"""
+        SET NOCOUNT ON;
+        WITH cliente_subrubro AS (
+            SELECT DISTINCT
+                f.id_cliente,
+                p.id_subrubro1 AS subrubro_id,
+                UPPER(LTRIM(RTRIM(p.subrubro1))) AS subrubro
+            FROM dbo.cli_factura_item fi
+            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+            INNER JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
+            WHERE ISNULL(f.Anulado, 0) = 0
+              {_authorized_invoice_filter("f")}
+              AND CAST(f.fecha AS date) BETWEEN DATEADD(month, -15, CAST(? AS date)) AND CAST(? AS date)
+              {_commercial_zone_filter("f")}
+              AND f.tipo IN ('FC', 'ND')
+              AND UPPER(LTRIM(RTRIM(p.subrubro1))) IN ({placeholders})
+        ), conteos AS (
+            SELECT subrubro_id, MAX(subrubro) AS subrubro, COUNT(DISTINCT id_cliente) AS clientes
+            FROM cliente_subrubro
+            GROUP BY subrubro_id
+        ), total AS (
+            SELECT COUNT(DISTINCT id_cliente) AS clientes_total
+            FROM cliente_subrubro
+        )
+        SELECT
+            a.subrubro_id AS origen_id,
+            MAX(a.subrubro) AS origen,
+            b.subrubro_id AS destino_id,
+            MAX(b.subrubro) AS destino,
+            MAX(co.clientes) AS clientes_origen,
+            MAX(cd.clientes) AS clientes_destino,
+            COUNT(DISTINCT a.id_cliente) AS clientes_ambos,
+            MAX(t.clientes_total) AS clientes_total
+        FROM cliente_subrubro a
+        INNER JOIN cliente_subrubro b
+            ON b.id_cliente = a.id_cliente
+           AND b.subrubro_id <> a.subrubro_id
+        INNER JOIN conteos co ON co.subrubro_id = a.subrubro_id
+        INNER JOIN conteos cd ON cd.subrubro_id = b.subrubro_id
+        CROSS JOIN total t
+        GROUP BY a.subrubro_id, b.subrubro_id;
+        """,
+        (fecha_hasta, fecha_hasta, *names),
+    )
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def venta_cruzada_cliente(
     cliente: str,
     fecha_hasta: str,
     zonas_filtro: tuple[str, ...] = (),
-    limite: int = 15,
+    limite: int = 8,
 ) -> pd.DataFrame:
-    columns = ["compra", "ofrecer", "productos_disponibles"]
+    columns = ["compra", "ofrecer", "fundamento", "productos_disponibles"]
     if data_mode() == "snapshot":
-        return pd.DataFrame(columns=columns)
-
-    rules = _cross_selling_rules()
-    if rules.empty:
         return pd.DataFrame(columns=columns)
 
     zona_sql, zona_params = _current_client_zone_filter("z", zonas_filtro)
@@ -1822,48 +1943,84 @@ def venta_cruzada_cliente(
 
     ids = tuple(int(value) for value in client_ids["id_cliente"].dropna().unique())
     placeholders = ", ".join("?" for _ in ids)
+    priority_names = tuple(name for name, _ in PRIORITY_CROSS_SELLING_SUBRUBROS)
+    priority_placeholders = ", ".join("?" for _ in priority_names)
+    signed_total = _signed_item_total("f", "total").replace("f.total", "fi.total")
     purchases = read_sql(
         f"""
         SET NOCOUNT ON;
-        WITH productos AS (
-            SELECT
-                fi.id_producto,
-                p.id_subrubro1 AS subrubro_id,
-                SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) AS facturacion
-            FROM dbo.cli_factura_item fi
-            INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
-            LEFT JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
-            WHERE ISNULL(f.Anulado, 0) = 0
-              {_authorized_invoice_filter("f")}
-              AND f.id_cliente IN ({placeholders})
-              AND CAST(f.fecha AS date) BETWEEN DATEADD(year, -2, CAST(? AS date)) AND CAST(? AS date)
-              {_commercial_zone_filter("f")}
-              {_commercial_document_filter("f")}
-              AND p.id_subrubro1 IS NOT NULL
-            GROUP BY fi.id_producto, p.id_subrubro1
-            HAVING SUM({_signed_item_total("f", "total").replace("f.total", "fi.total")}) > 0
-        ), habituales AS (
-            SELECT TOP (8) subrubro_id
-            FROM productos
-            ORDER BY facturacion DESC
-        )
-        SELECT DISTINCT subrubro_id
-        FROM habituales;
+        SELECT
+            p.id_subrubro1 AS subrubro_id,
+            UPPER(LTRIM(RTRIM(p.subrubro1))) AS subrubro,
+            SUM({signed_total}) AS facturacion
+        FROM dbo.cli_factura_item fi
+        INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
+        INNER JOIN dbo.pro_producto_busqueda_detalle p ON p.id_producto = fi.id_producto
+        WHERE ISNULL(f.Anulado, 0) = 0
+          {_authorized_invoice_filter("f")}
+          AND f.id_cliente IN ({placeholders})
+          AND CAST(f.fecha AS date) BETWEEN DATEADD(month, -15, CAST(? AS date)) AND CAST(? AS date)
+          {_commercial_zone_filter("f")}
+          {_commercial_document_filter("f")}
+          AND UPPER(LTRIM(RTRIM(p.subrubro1))) IN ({priority_placeholders})
+        GROUP BY p.id_subrubro1, UPPER(LTRIM(RTRIM(p.subrubro1)))
+        HAVING SUM({signed_total}) > 0
+        ORDER BY facturacion DESC;
         """,
-        (*ids, fecha_hasta, fecha_hasta),
+        (*ids, fecha_hasta, fecha_hasta, *priority_names),
     )
     if purchases.empty:
         return pd.DataFrame(columns=columns)
 
     purchased_ids = set(pd.to_numeric(purchases["subrubro_id"], errors="coerce").dropna().astype(int))
-    applicable = rules[
-        rules["origen_id"].isin(purchased_ids) & ~rules["destino_id"].isin(purchased_ids)
+    affinity = _cross_selling_affinity(fecha_hasta)
+    if affinity.empty:
+        return pd.DataFrame(columns=columns)
+
+    numeric_columns = ("origen_id", "destino_id", "clientes_origen", "clientes_destino", "clientes_ambos", "clientes_total")
+    for column in numeric_columns:
+        affinity[column] = pd.to_numeric(affinity[column], errors="coerce").fillna(0)
+    affinity["origen_id"] = affinity["origen_id"].astype(int)
+    affinity["destino_id"] = affinity["destino_id"].astype(int)
+    applicable = affinity[
+        affinity["origen_id"].isin(purchased_ids)
+        & ~affinity["destino_id"].isin(purchased_ids)
+        & (affinity["clientes_ambos"] >= 10)
+        & (affinity["clientes_origen"] >= 20)
     ].copy()
     if applicable.empty:
         return pd.DataFrame(columns=columns)
 
+    applicable["coincidencia"] = applicable["clientes_ambos"] / applicable["clientes_origen"]
+    applicable["penetracion_destino"] = applicable["clientes_destino"] / applicable["clientes_total"]
+    applicable["afinidad"] = applicable["coincidencia"] / applicable["penetracion_destino"].replace(0, pd.NA)
+    participation = dict(PRIORITY_CROSS_SELLING_SUBRUBROS)
+    applicable["participacion"] = applicable["destino"].map(participation).fillna(0)
+    applicable["complemento_valido"] = applicable.apply(
+        lambda row: str(row["destino"]) in CROSS_SELLING_COMPLEMENTS.get(str(row["origen"]), set()),
+        axis=1,
+    )
+    applicable = applicable[
+        applicable["complemento_valido"]
+        & (applicable["coincidencia"] >= 0.15)
+        & (applicable["afinidad"] >= 0.90)
+    ].copy()
+    if applicable.empty:
+        return pd.DataFrame(columns=columns)
+    applicable["score"] = (
+        0.50 * applicable["coincidencia"]
+        + 0.25 * applicable["afinidad"].clip(upper=3) / 3
+        + 0.25 * applicable["participacion"] / max(participation.values())
+    )
+    applicable = (
+        applicable.sort_values(["score", "clientes_ambos"], ascending=[False, False])
+        .drop_duplicates("destino_id")
+        .head(max(int(limite), 1))
+    )
+
     destination_ids = tuple(int(value) for value in applicable["destino_id"].unique())
     destination_placeholders = ", ".join("?" for _ in destination_ids)
+    signed_quantity = _signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")
     products = read_sql(
         f"""
         SET NOCOUNT ON;
@@ -1873,8 +2030,10 @@ def venta_cruzada_cliente(
             FROM dbo.pro_stock
             GROUP BY id_producto
         ), ventas AS (
-            SELECT fi.id_producto,
-                   SUM({_signed_item_total("f", "cantidad").replace("f.cantidad", "fi.cantidad")}) AS unidades_6m
+            SELECT
+                fi.id_producto,
+                SUM({signed_quantity}) AS unidades_6m,
+                COUNT(DISTINCT CASE WHEN f.tipo IN ('FC', 'ND') THEN f.id_cliente END) AS clientes_6m
             FROM dbo.cli_factura_item fi
             INNER JOIN dbo.cli_factura f ON f.id_facturacion = fi.id_facturacion
             WHERE ISNULL(f.Anulado, 0) = 0
@@ -1887,66 +2046,46 @@ def venta_cruzada_cliente(
         SELECT
             p.id_subrubro1 AS destino_id,
             p.id_producto,
-            LTRIM(RTRIM(COALESCE(p.codigo_ariculo, ''))) AS codigo,
             LTRIM(RTRIM(COALESCE(p.descripcion, CONCAT('Producto ', p.id_producto)))) AS producto,
             CAST(ISNULL(s.disponible, 0) AS decimal(18, 2)) AS stock,
-            CAST(ISNULL(v.unidades_6m, 0) AS decimal(18, 2)) AS unidades_6m
+            CAST(ISNULL(v.unidades_6m, 0) AS decimal(18, 2)) AS unidades_6m,
+            CAST(ISNULL(v.clientes_6m, 0) AS int) AS clientes_6m
         FROM dbo.pro_producto_busqueda_detalle p
         LEFT JOIN stock s ON s.id_producto = p.id_producto
         LEFT JOIN ventas v ON v.id_producto = p.id_producto
         WHERE ISNULL(p.activo, 0) = 1
           AND ISNULL(p.bloqueado, 0) = 0
-          AND ISNULL(s.disponible, 0) > 0
+          AND ISNULL(s.disponible, 0) >= 10
+          AND ISNULL(v.unidades_6m, 0) > 0
+          AND ISNULL(v.clientes_6m, 0) >= 5
           AND p.id_subrubro1 IN ({destination_placeholders})
-        ORDER BY p.id_subrubro1, unidades_6m DESC, stock DESC, p.descripcion;
+        ORDER BY p.id_subrubro1, clientes_6m DESC, unidades_6m DESC, stock DESC, p.descripcion;
         """,
         (fecha_hasta, fecha_hasta, *destination_ids),
     )
+    if products.empty:
+        return pd.DataFrame(columns=columns)
+    products["destino_id"] = pd.to_numeric(products["destino_id"], errors="coerce").fillna(0).astype(int)
+    products = products.drop_duplicates(["destino_id", "id_producto"])
 
-    if not products.empty:
-        products["destino_id"] = pd.to_numeric(products["destino_id"], errors="coerce").fillna(0).astype(int)
-        products = products.drop_duplicates(["destino_id", "id_producto"])
-    priority_order = {
-        "Piloto prioritario": 0,
-        "Piloto logico": 1,
-        "Piloto lógico": 1,
-        "Piloto supervisado": 2,
-        "Piloto segmentado": 3,
-        "Revision por SKU": 4,
-        "Revisión por SKU": 4,
-    }
     rows: list[dict[str, object]] = []
-    for rule in applicable.itertuples():
-        candidates = products[products["destino_id"] == int(rule.destino_id)].copy()
-        product_filter = str(rule.filtro_producto or "").strip()
-        if product_filter.startswith("-"):
-            candidates = candidates[
-                ~candidates["producto"].astype(str).str.contains(product_filter[1:], case=False, na=False)
-            ]
-        elif product_filter:
-            candidates = candidates[
-                candidates["producto"].astype(str).str.contains(product_filter, case=False, na=False, regex=True)
-            ]
-        top = candidates.head(3)
-        available = "; ".join(
-            f"{row.producto} ({float(row.stock):.0f} u)" for row in top.itertuples()
-        )
+    for opportunity in applicable.itertuples(index=False):
+        top = products[products["destino_id"] == int(opportunity.destino_id)].head(3)
+        available = "; ".join(f"{row.producto} ({float(row.stock):.0f} u)" for row in top.itertuples())
         if not available:
             continue
         rows.append(
             {
-                "_priority": priority_order.get(str(rule.decision), 9),
-                "_coincidence": float(rule.coincidencia),
-                "compra": str(rule.origen),
-                "ofrecer": str(rule.destino),
+                "compra": str(opportunity.origen),
+                "ofrecer": str(opportunity.destino),
+                "fundamento": (
+                    f"{float(opportunity.coincidencia):.0%} de los clientes que compran "
+                    f"{str(opportunity.origen).lower()} tambien compran esta categoria"
+                ),
                 "productos_disponibles": available,
             }
         )
-
-    if not rows:
-        return pd.DataFrame(columns=columns)
-    result = pd.DataFrame(rows).sort_values(["_priority", "_coincidence"], ascending=[True, False])
-    return result.head(max(int(limite), 1)).loc[:, columns]
+    return pd.DataFrame(rows, columns=columns)
 
 
 def cliente_credito(

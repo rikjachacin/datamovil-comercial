@@ -3372,6 +3372,7 @@ if vista_vendedor_activa:
                 column_config={
                     "compra": "El cliente compra",
                     "ofrecer": "Ofrecer",
+                    "fundamento": "Por que sugerirlo",
                     "productos_disponibles": "Productos disponibles",
                 },
             )
