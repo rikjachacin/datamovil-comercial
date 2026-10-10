@@ -2849,6 +2849,12 @@ if periodo == "Mes en curso" or cliente_en_mes_actual:
     cliente_comparacion_label = "Mes anterior"
 
 kpi_df = siscor_db.kpis(desde_sql, hasta_sql, zonas_filtro).iloc[0]
+unidades_df = siscor_db.unidades_por_zona(desde_sql, hasta_sql, zonas_filtro)
+unidades_vendidas = (
+    pd.to_numeric(unidades_df["unidades"], errors="coerce").fillna(0).sum()
+    if not unidades_df.empty
+    else 0
+)
 
 if vista_vendedor_activa:
     if current_user.is_admin:
@@ -2999,6 +3005,7 @@ if vista_vendedor_activa:
                                 else 0
                             ),
                         ),
+                        ("Unidades vendidas", number(unidades_vendidas)),
                     ]
                 ),
                 unsafe_allow_html=True,
@@ -3015,6 +3022,7 @@ if vista_vendedor_activa:
             ("Comprobantes", number(comprobantes_periodo)),
             ("Clientes", number(clientes_periodo)),
             ("Ticket promedio", money(ticket_promedio_periodo)),
+            ("Unidades vendidas", number(unidades_vendidas)),
         ]
 
         periodo_en_un_mes = (
@@ -3369,13 +3377,6 @@ if vista_vendedor_activa:
             )
 
     st.stop()
-
-unidades_df = siscor_db.unidades_por_zona(desde_sql, hasta_sql, zonas_filtro)
-unidades_vendidas = (
-    pd.to_numeric(unidades_df["unidades"], errors="coerce").fillna(0).sum()
-    if not unidades_df.empty
-    else 0
-)
 
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Ventas", money(kpi_df["total"]))
