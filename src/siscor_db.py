@@ -92,6 +92,15 @@ BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 SALES_ZONE_OVERRIDES = (
     {
+        "date": "2026-10-13",
+        "client": "ASURMENDI ADOLFO MARTIN VET",
+        "client_id": "114989",
+        "source_zone": "MOSTRADOR",
+        "target_zone": "DAVID",
+        "id_facturacion": "",
+        "invoice_numbers": ("103304", "85551", "85552"),
+    },
+    {
         "date": "2026-09-18",
         "client": "CLAN ULTIMATE S.A. (REG: MP 15450)",
         "client_id": "114873",
