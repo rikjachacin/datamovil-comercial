@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import io
 from pathlib import Path
 import re
+import unicodedata
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -156,7 +157,18 @@ def _read_xlsx_bytes(content: bytes) -> pd.DataFrame:
     if header_index is None:
         return pd.DataFrame(columns=["vendedor", "comision_cobranza", "comision_ventas", "ventas_acumuladas"])
 
-    headers = [value.strip().lower() for value in rows[header_index]]
+    def normalize_header(value: object) -> str:
+        text = unicodedata.normalize("NFKD", str(value or ""))
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        return " ".join(text.strip().lower().split())
+
+    def value_by_prefix(item: dict[str, object], prefix: str) -> object:
+        return next(
+            (value for key, value in item.items() if key == prefix or key.startswith(f"{prefix} ")),
+            0,
+        )
+
+    headers = [normalize_header(value) for value in rows[header_index]]
     parsed_rows: list[dict[str, object]] = []
     for row in rows[header_index + 1 :]:
         if not row or not row[0].strip():
@@ -166,8 +178,12 @@ def _read_xlsx_bytes(content: bytes) -> pd.DataFrame:
         if not vendedor or vendedor.upper() == "TOTAL":
             continue
         vendedor = SOURCE_VENDOR_ALIASES.get(vendedor.upper(), vendedor)
-        cobranza = siscor_db._to_numeric_amount([item.get("comision cobranza", 0)]).iloc[0]
-        ventas = siscor_db._to_numeric_amount([item.get("comision ventas", 0)]).iloc[0]
+        cobranza = siscor_db._to_numeric_amount(
+            [value_by_prefix(item, "comision cobranza")]
+        ).iloc[0]
+        ventas = siscor_db._to_numeric_amount(
+            [value_by_prefix(item, "comision ventas")]
+        ).iloc[0]
         parsed_rows.append(
             {
                 "vendedor": vendedor,
