@@ -92,6 +92,15 @@ BALANCE_DOCUMENT_TYPES = ("FC", "ND", "NC", "PC")
 NEGATIVE_BALANCE_DOCUMENT_TYPES = ("NC", "PC")
 SALES_ZONE_OVERRIDES = (
     {
+        "date": "2026-10-21",
+        "client": "FERRARI NOELIA (M.P.10742)",
+        "client_id": "101423",
+        "source_zone": "NOELIA",
+        "target_zone": "LUCIA MORENO",
+        "id_facturacion": "301727",
+        "invoice_numbers": ("76742", "240882"),
+    },
+    {
         "date": "2026-10-13",
         "client": "ASURMENDI ADOLFO MARTIN VET",
         "client_id": "114989",
