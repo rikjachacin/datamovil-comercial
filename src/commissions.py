@@ -42,7 +42,12 @@ USER_VENDOR_MAP = {
 AUTHORIZED_USERS = set(USER_VENDOR_MAP)
 COMMISSIONED_USERS = {"carina", "javier", "jonatan", "juan", "juancruz", "micaela"}
 COMMISSIONED_VENDORS = {"Carina", "Javier", "Jonatan", "Juan Cruz M.", "Micaela"}
-SOURCE_VENDOR_ALIASES = {"JULIO M.": "Jonatan", "JULIO MARTINEZ": "Jonatan"}
+SOURCE_VENDOR_ALIASES = {
+    "JULIO M.": "Jonatan",
+    "JULIO MARTINEZ": "Jonatan",
+    "JUAN CRUZ MANZELLI": "Juan Cruz M.",
+    "MICAELA GONZALEZ": "Micaela",
+}
 
 
 @dataclass(frozen=True)
@@ -165,7 +170,7 @@ def _read_xlsx_bytes(content: bytes) -> pd.DataFrame:
     def value_by_prefix(item: dict[str, object], prefix: str) -> object:
         return next(
             (value for key, value in item.items() if key == prefix or key.startswith(f"{prefix} ")),
-            0,
+            "",
         )
 
     headers = [normalize_header(value) for value in rows[header_index]]
@@ -178,11 +183,15 @@ def _read_xlsx_bytes(content: bytes) -> pd.DataFrame:
         if not vendedor or vendedor.upper() == "TOTAL":
             continue
         vendedor = SOURCE_VENDOR_ALIASES.get(vendedor.upper(), vendedor)
+        cobranza_value = value_by_prefix(item, "comision cobranza")
+        ventas_value = value_by_prefix(item, "comision ventas")
+        if not str(cobranza_value).strip() and not str(ventas_value).strip():
+            continue
         cobranza = siscor_db._to_numeric_amount(
-            [value_by_prefix(item, "comision cobranza")]
+            [cobranza_value]
         ).iloc[0]
         ventas = siscor_db._to_numeric_amount(
-            [value_by_prefix(item, "comision ventas")]
+            [ventas_value]
         ).iloc[0]
         parsed_rows.append(
             {
@@ -220,6 +229,9 @@ def _commission_file_sort_key(path: Path) -> tuple[str, float]:
     match = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{8}_\d{6})", path.name)
     if match:
         return (match.group(1) + "_" + match.group(2), path.stat().st_mtime)
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", path.name)
+    if date_match:
+        return (date_match.group(1), path.stat().st_mtime)
     return ("", path.stat().st_mtime)
 
 
