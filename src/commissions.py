@@ -180,8 +180,10 @@ def _read_xlsx_bytes(content: bytes) -> pd.DataFrame:
             continue
         item = {headers[index]: value for index, value in enumerate(row) if index < len(headers)}
         vendedor = str(item.get("vendedor", "")).strip()
-        if not vendedor or vendedor.upper() == "TOTAL":
+        if not vendedor:
             continue
+        if vendedor.upper() == "TOTAL":
+            break
         vendedor = SOURCE_VENDOR_ALIASES.get(vendedor.upper(), vendedor)
         cobranza_value = value_by_prefix(item, "comision cobranza")
         ventas_value = value_by_prefix(item, "comision ventas")
