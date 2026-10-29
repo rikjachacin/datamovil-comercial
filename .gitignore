@@ -6,11 +6,15 @@ __pycache__/
 .streamlit/*.bak
 .env
 cloudflared*.log
+bruncas-comercial.*.log
+bruncas-analitica.*.log
+efectividad-calle.*.log
 data/*.csv
 data/*.parquet
 data/*.key
 data/*.sqlite*
 data/siscor_runtime.json
+data/itinerario_vendedores_calle.xlsx
 data/comisiones/*.xlsx
 data/informes_semanales/*.xlsx
 *.ovpn

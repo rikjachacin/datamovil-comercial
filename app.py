@@ -1985,7 +1985,12 @@ def show_commissions(current_user: auth.User, fecha_hasta_mes: date) -> None:
 
     result = commissions.load_latest()
     data = result.data.copy() if result.enabled else pd.DataFrame()
-    parrilla_objectives = parrilla.load_objectives()
+    try:
+        parrilla_objectives = parrilla.load_objectives()
+        parrilla_message = ""
+    except Exception as exc:
+        parrilla_objectives = pd.DataFrame(columns=parrilla.OBJECTIVES_COLUMNS)
+        parrilla_message = str(exc)
     parrilla_objectives = parrilla_objectives[
         parrilla_objectives["mes"].eq(fecha_hasta_mes.strftime("%Y-%m"))
     ].copy()
@@ -2012,6 +2017,10 @@ def show_commissions(current_user: auth.User, fecha_hasta_mes: date) -> None:
     def render_parrilla_progress(vendor_name: str | None) -> None:
         st.markdown("#### Cumplimiento por laboratorio")
         st.caption(f"Facturacion acumulada del {parrilla_desde:%d/%m/%Y} al {fecha_hasta_mes:%d/%m/%Y}")
+
+        if parrilla_message:
+            st.warning(parrilla_message)
+            return
 
         vendor_zones = ()
         if not current_user.is_admin:
