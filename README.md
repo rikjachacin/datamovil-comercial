@@ -18,6 +18,18 @@ Los tres modulos usan consultas de lectura. Los datos, usuarios y credenciales p
 
 ## Ejecucion local
 
+### Instalacion asistida en Windows
+
+Después de descargar el repositorio, ejecutar con doble clic:
+
+```text
+INSTALAR_EN_NUEVA_COMPUTADORA.bat
+```
+
+El instalador crea el entorno de Python, instala las dependencias y crea los accesos directos. No copia ni publica credenciales: al terminar todavía deben configurarse `.streamlit/secrets.toml`, `.streamlit/users.toml` y la clave privada del snapshot.
+
+### Instalacion manual
+
 1. Crear un entorno virtual.
 2. Instalar dependencias desde `requirements.txt`.
 3. Copiar `.streamlit/secrets.example.toml` a `.streamlit/secrets.toml`.
